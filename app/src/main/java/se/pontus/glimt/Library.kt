@@ -19,7 +19,7 @@ data class Entry(
     val series: String? = null,
     val season: Int = 0,
     val episode: Int = 0,
-    /** Xtream stream_id för filmer (används för att hämta handling, bakgrundsbild m.m.). */
+    /** Xtream-id: stream_id för filmer, seriens series_id för avsnitt. */
     val xtreamId: String? = null,
     /** När titeln lades till hos leverantören (unix-sekunder), 0 om okänt. */
     val added: Long = 0,

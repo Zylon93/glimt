@@ -81,7 +81,16 @@ object Xtream {
         return Library(movies.keys.toList(), movies, series.keys.toList(), series)
     }
 
-    suspend fun seriesInfo(acc: XtreamAccount, s: Series): Pair<Details?, List<Entry>> = withContext(Dispatchers.IO) {
+    private val seriesCache = HashMap<String, Pair<Details?, List<Entry>>>()
+
+    /** Seriens info och alla avsnitt. Cachas i minnet. */
+    suspend fun seriesInfo(acc: XtreamAccount, s: Series): Pair<Details?, List<Entry>> {
+        val id = s.xtreamId ?: return null to emptyList()
+        synchronized(seriesCache) { seriesCache[id] }?.let { return it }
+        return fetchSeriesInfo(acc, s).also { r -> synchronized(seriesCache) { seriesCache[id] = r } }
+    }
+
+    private suspend fun fetchSeriesInfo(acc: XtreamAccount, s: Series): Pair<Details?, List<Entry>> = withContext(Dispatchers.IO) {
         val json = JSONObject(Net.bytes(acc.api("get_series_info", "&series_id=${s.xtreamId}")).decodeToString())
         val details = json.optJSONObject("info")?.let { parseDetails(it) }
         val bySeason = json.optJSONObject("episodes") ?: return@withContext details to emptyList()
@@ -98,6 +107,7 @@ object Xtream {
                 out += Entry(
                     title, s.group, s.logo, acc.episodeUrl(id, e.optString("container_extension")),
                     Kind.EPISODE, s.name, season, num,
+                    xtreamId = s.xtreamId, // för avsnitt: seriens id
                 )
             }
         }
@@ -137,6 +147,9 @@ object Xtream {
             year = Regex("""(19|20)\d{2}""").find(date)?.value,
             duration = duration.ifBlank { null },
             genre = info.optString("genre").ifBlank { null },
+            tmdbId = info.optString("tmdb_id").ifBlank { info.optString("tmdb") }
+                .takeIf { (it.toIntOrNull() ?: 0) > 0 },
+            imdbId = info.optString("imdb_id").takeIf { it.startsWith("tt") },
         )
     }
 

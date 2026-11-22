@@ -8,4 +8,7 @@ data class Details(
     val year: String?,
     val duration: String?,
     val genre: String?,
+    /** För TheIntroDB (hoppa över intro/eftertexter). */
+    val tmdbId: String? = null,
+    val imdbId: String? = null,
 )

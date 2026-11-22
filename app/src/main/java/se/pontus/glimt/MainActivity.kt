@@ -50,6 +50,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
 
 internal enum class Section(val label: String, val icon: String) {
     HOME("Hem", "⌂"),
+    SEARCH("Sök", "⌕"),
     MOVIES("Filmer", "▶"),
     SERIES("Serier", "▤"),
     FAVORITES("Favoriter", "♥"),
@@ -176,6 +178,7 @@ private fun App(prefs: Prefs) {
                     is LoadState.Ready -> key(section) {
                         when (section) {
                             Section.HOME -> HomeScreen(s.library, play, open) { section = it }
+                            Section.SEARCH -> SearchScreen(s.library, onOpen = open)
                             Section.MOVIES -> Browser(s.library, seriesMode = false, onOpen = open)
                             Section.SERIES -> Browser(s.library, seriesMode = true, onOpen = open)
                             Section.FAVORITES -> FavoritesScreen(open)
@@ -325,6 +328,83 @@ private fun <T> Grid(list: List<T>, emptyText: String, minWidth: Int = 150, card
         modifier = Modifier.fillMaxSize(),
     ) {
         items(list) { card(it) }
+    }
+}
+
+// ---------------------------------------------------------------- Sök
+
+private sealed interface Hit {
+    data class M(val e: Entry) : Hit
+    data class S(val s: Series) : Hit
+}
+
+/** Sök bland alla filmer och serier samtidigt. Körs i bakgrunden så att tangentbordet inte hackar. */
+@Composable
+private fun SearchScreen(lib: Library, onOpen: (Detail) -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var hits by remember { mutableStateOf<List<Hit>>(emptyList()) }
+    var counts by remember { mutableStateOf(0 to 0) }
+    var searching by remember { mutableStateOf(false) }
+    val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    LaunchedEffect(query) {
+        val term = query.trim()
+        if (term.length < 2) {
+            hits = emptyList()
+            counts = 0 to 0
+            return@LaunchedEffect
+        }
+        kotlinx.coroutines.delay(350)
+        searching = true
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val words = term.lowercase().split(' ').filter { it.isNotBlank() }
+            fun matches(t: String): Boolean {
+                val l = t.lowercase()
+                return words.all { it in l }
+            }
+            val series = lib.allSeries.filter { matches(it.name) }
+            val movies = lib.allMovies.filter { matches(it.title) }
+            // Titlar som börjar med söktermen först
+            val first = words.first()
+            val s = series.sortedBy { if (displayTitle(it.name).lowercase().startsWith(first)) 0 else 1 }
+            val m = movies.sortedBy { if (displayTitle(it.title).lowercase().startsWith(first)) 0 else 1 }
+            Triple(s.take(150).map { Hit.S(it) } + m.take(300).map { Hit.M(it) }, series.size, movies.size)
+        }
+        hits = result.first
+        counts = result.third to result.second
+        searching = false
+    }
+
+    Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 24.dp, end = 12.dp)) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            placeholder = { Text("Sök film eller serie…") },
+            modifier = Modifier.widthIn(max = 700.dp).fillMaxWidth().focusRequester(fieldFocus).dpadEscape(),
+        )
+        Spacer(Modifier.height(8.dp))
+        val (movieCount, seriesCount) = counts
+        Text(
+            when {
+                query.trim().length < 2 -> "Skriv minst två tecken. Tips: håll inne mikrofonknappen på fjärrkontrollen för att prata."
+                searching -> "Söker…"
+                else -> "$movieCount filmer · $seriesCount serier"
+            },
+            color = Muted,
+            fontSize = 14.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        if (hits.isNotEmpty()) {
+            Grid(hits, emptyText = "") { h ->
+                when (h) {
+                    is Hit.S -> PosterCard(h.s.name, h.s.logo, "Serie") { onOpen(Detail.Show(h.s)) }
+                    is Hit.M -> PosterCard(h.e.title, h.e.logo, h.e.group) { onOpen(Detail.Movie(h.e)) }
+                }
+            }
+        } else if (query.trim().length >= 2 && !searching) {
+            Message("Inga träffar på \"${query.trim()}\"")
+        }
     }
 }
 

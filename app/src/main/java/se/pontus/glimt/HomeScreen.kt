@@ -70,10 +70,10 @@ internal fun HomeScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Tile("Filmer", "${lib.allMovies.size} filmer", "▶", Color(0xFF2F5FD0), Color(0xFF5B8CFF), Modifier.weight(1f)) {
+                Tile("Filmer", "${num(lib.allMovies.size)} filmer", "▶", Color(0xFF2F5FD0), Color(0xFF5B8CFF), Modifier.weight(1f)) {
                     onSection(Section.MOVIES)
                 }
-                Tile("Serier", "${lib.allSeries.size} serier", "▤", Color(0xFF5B3FC8), Color(0xFF8F6BFF), Modifier.weight(1f)) {
+                Tile("Serier", "${num(lib.allSeries.size)} serier", "▤", Color(0xFF5B3FC8), Color(0xFF8F6BFF), Modifier.weight(1f)) {
                     onSection(Section.SERIES)
                 }
                 Tile("Favoriter", "${favMovies.size + favSeries.size} st", "♥", Color(0xFFC8303F), Color(0xFFFF5A6A), Modifier.weight(1f)) {
@@ -247,11 +247,13 @@ private fun Tile(
             Text(icon, color = Color.White, fontSize = 26.sp)
             Spacer(Modifier.width(14.dp))
             Column {
-                Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                Text(subtitle, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+                Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(subtitle, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, maxLines = 1)
             }
             Spacer(Modifier.weight(1f))
             Text("›", color = Color.White, fontSize = 28.sp)
         }
     }
 }
+
+private fun num(n: Int): String = String.format(java.util.Locale("sv", "SE"), "%,d", n)

@@ -34,7 +34,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -113,6 +115,24 @@ private fun App(prefs: Prefs) {
         }
     }
     BackHandler(enabled = openSeries != null) { openSeries = null }
+
+    // ---- Visa kraschrapport från förra körningen ----
+    val crashFile = remember { java.io.File(appContext.filesDir, GlimtApp.CRASH_FILE) }
+    var crash by remember { mutableStateOf(crashFile.takeIf { it.exists() }?.readText()) }
+    crash?.let { report ->
+        AlertDialog(
+            onDismissRequest = { crashFile.delete(); crash = null },
+            confirmButton = { TextButton(onClick = { crashFile.delete(); crash = null }) { Text("Stäng") } },
+            title = { Text("Appen kraschade förra gången") },
+            text = {
+                Text(
+                    report.take(2500),
+                    fontSize = 11.sp,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            },
+        )
+    }
 
     // ---- Automatisk uppdatering från GitHub ----
     var update by remember { mutableStateOf<Updater.Release?>(null) }

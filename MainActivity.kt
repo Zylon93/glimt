@@ -262,7 +262,13 @@ private fun Browser(lib: Library, seriesMode: Boolean, onPlay: (Entry) -> Unit, 
                 if (term.length >= 2) lib.allSeries.filter { it.name.contains(term, ignoreCase = true) }.take(500)
                 else lib.series[selected].orEmpty()
             }
-            PosterGrid(list, title = { it.name }, logo = { it.logo }, caption = { "${it.episodes.size} avsnitt" }, onClick = onOpenSeries)
+            PosterGrid(
+                list,
+                title = { it.name },
+                logo = { it.logo },
+                caption = { if (it.xtreamId != null) null else "${it.episodes.size} avsnitt" },
+                onClick = onOpenSeries,
+            )
         } else {
             val list = remember(selected, term) {
                 if (term.length >= 2) lib.allMovies.filter { it.title.contains(term, ignoreCase = true) }.take(500)
@@ -320,25 +326,50 @@ private fun <T> PosterGrid(
 
 @Composable
 private fun EpisodeList(series: Series, onPlay: (Entry) -> Unit) {
+    var episodes by remember(series) { mutableStateOf(series.episodes) }
+    var error by remember(series) { mutableStateOf<String?>(null) }
     val first = remember { FocusRequester() }
-    LaunchedEffect(series) { runCatching { first.requestFocus() } }
+    LaunchedEffect(series) {
+        val acc = Repo.account
+        if (episodes.isEmpty() && series.xtreamId != null && acc != null) {
+            try {
+                episodes = Xtream.episodes(acc, series)
+                if (episodes.isEmpty()) error = "Inga avsnitt hittades."
+            } catch (e: Exception) {
+                error = "Kunde inte hämta avsnitten: ${e.message}"
+            }
+        }
+    }
+    LaunchedEffect(episodes) { if (episodes.isNotEmpty()) runCatching { first.requestFocus() } }
+
     Column(Modifier.fillMaxSize()) {
         Text(series.name, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text("${series.episodes.size} avsnitt · Tillbaka-knappen går ur serien", color = Muted)
+        Text(
+            if (episodes.isEmpty()) "Tillbaka-knappen går ur serien"
+            else "${episodes.size} avsnitt · Tillbaka-knappen går ur serien",
+            color = Muted,
+        )
         Spacer(Modifier.height(16.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(series.episodes) { i, e ->
-                val label = if (e.season > 0) "S%02d E%02d".format(e.season, e.episode) else ""
-                val base = if (i == 0) Modifier.focusRequester(first) else Modifier
-                FocusBox(onClick = { onPlay(e) }, modifier = base.fillMaxWidth()) { focused ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(if (focused) CardBg else Color(0xFF161A21))
-                            .padding(horizontal = 18.dp, vertical = 12.dp)
-                    ) {
-                        Text(label, color = Accent, modifier = Modifier.width(110.dp))
-                        Text(e.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val err = error
+        when {
+            err != null -> Message(err)
+            episodes.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Accent)
+            }
+            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxSize()) {
+                itemsIndexed(episodes) { i, e ->
+                    val label = if (e.season > 0) "S%02d E%02d".format(e.season, e.episode) else ""
+                    val base = if (i == 0) Modifier.focusRequester(first) else Modifier
+                    FocusBox(onClick = { onPlay(e) }, modifier = base.fillMaxWidth()) { focused ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(if (focused) CardBg else Color(0xFF161A21))
+                                .padding(horizontal = 18.dp, vertical = 12.dp)
+                        ) {
+                            Text(label, color = Accent, modifier = Modifier.width(110.dp))
+                            Text(e.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }

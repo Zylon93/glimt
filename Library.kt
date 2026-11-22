@@ -21,7 +21,14 @@ data class Entry(
     val episode: Int = 0,
 )
 
-data class Series(val name: String, val group: String, val logo: String?, val episodes: List<Entry>)
+data class Series(
+    val name: String,
+    val group: String,
+    val logo: String?,
+    val episodes: List<Entry>,
+    /** Satt för Xtream-serier; avsnitten hämtas då när serien öppnas. */
+    val xtreamId: String? = null,
+)
 
 class Library(
     val movieGroups: List<String>,
@@ -129,12 +136,23 @@ object Repo {
     private val _state = MutableStateFlow<LoadState>(LoadState.Idle)
     val state: StateFlow<LoadState> = _state
 
+    /** Satt när spellistan är ett Xtream-konto (get.php?username=…). */
+    @Volatile
+    var account: XtreamAccount? = null
+        private set
+
     suspend fun load(context: Context, url: String, forceDownload: Boolean): Unit = withContext(Dispatchers.IO) {
         val file = File(context.filesDir, "playlist.m3u")
         try {
-            if (forceDownload || !file.exists() || file.length() == 0L) download(url, file)
-            _state.value = LoadState.Loading("Läser spellistan…")
-            val library = file.bufferedReader(Charsets.UTF_8).use { M3u.parse(it) }
+            val acc = Xtream.accountFrom(url)
+            account = acc
+            val library = if (acc != null) {
+                Xtream.load(context.filesDir, acc, forceDownload) { _state.value = LoadState.Loading(it) }
+            } else {
+                if (forceDownload || !file.exists() || file.length() == 0L) download(url, file)
+                _state.value = LoadState.Loading("Läser spellistan…")
+                file.bufferedReader(Charsets.UTF_8).use { M3u.parse(it) }
+            }
             _state.value = LoadState.Ready(library)
         } catch (e: Exception) {
             _state.value = LoadState.Failed(e.message ?: e.toString())

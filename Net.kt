@@ -4,6 +4,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
+// Samma som IPVIO använder – vissa leverantörer blockerar okända appar (HTTP 884).
 const val USER_AGENT = "okhttp/4.12.0"
 
 object Net {

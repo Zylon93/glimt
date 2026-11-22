@@ -1,6 +1,8 @@
 package se.pontus.glimt
 
+import android.app.Activity
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -112,15 +114,61 @@ private fun App(prefs: Prefs) {
     }
     BackHandler(enabled = openSeries != null) { openSeries = null }
 
+    // ---- Automatisk uppdatering från GitHub ----
+    var update by remember { mutableStateOf<Updater.Release?>(null) }
+    var updateStatus by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { update = runCatching { Updater.check() }.getOrNull() }
+    val startUpdate: () -> Unit = {
+        val release = update
+        if (release != null && updateStatus == null) {
+            scope.launch {
+                try {
+                    updateStatus = "Laddar ner…"
+                    val file = Updater.download(appContext, release) { pct -> updateStatus = "Laddar ner… $pct %" }
+                    updateStatus = null
+                    Updater.install(activity as Activity, file)
+                } catch (e: Exception) {
+                    updateStatus = null
+                    Toast.makeText(activity, "Uppdateringen misslyckades: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+    val checkUpdate: () -> Unit = {
+        scope.launch {
+            val result = runCatching { Updater.check() }
+            update = result.getOrNull()
+            val msg = when {
+                result.isFailure -> "Kunde inte kolla efter uppdatering: ${result.exceptionOrNull()?.message}"
+                update == null -> "Du har senaste versionen (${Updater.currentVersion})"
+                else -> "Ny version ${update?.versionName} finns – tryck på knappen uppe till höger"
+            }
+            Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
     Column(Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 24.dp)) {
-        TopBar(tab) {
+        TopBar(tab, onSelect = {
             tab = it
             openSeries = null
+        }) {
+            val release = update
+            if (release != null) {
+                FocusBox(onClick = startUpdate) {
+                    Text(
+                        updateStatus ?: "Uppdatera till ${release.versionName}",
+                        modifier = Modifier.background(Accent).padding(horizontal = 18.dp, vertical = 8.dp),
+                        color = Color.Black,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(16.dp))
         val series = openSeries
         when {
-            tab == Tab.SETTINGS -> SettingsScreen(prefs) {
+            tab == Tab.SETTINGS -> SettingsScreen(prefs, onCheckUpdate = checkUpdate) {
                 scope.launch { Repo.load(appContext, prefs.m3uUrl, forceDownload = true) }
                 tab = Tab.MOVIES
             }
@@ -144,7 +192,7 @@ private fun App(prefs: Prefs) {
 }
 
 @Composable
-private fun TopBar(current: Tab, onSelect: (Tab) -> Unit) {
+private fun TopBar(current: Tab, onSelect: (Tab) -> Unit, trailing: @Composable () -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -164,6 +212,8 @@ private fun TopBar(current: Tab, onSelect: (Tab) -> Unit) {
             }
             Spacer(Modifier.width(8.dp))
         }
+        Spacer(Modifier.weight(1f))
+        trailing()
     }
 }
 
@@ -297,7 +347,7 @@ private fun EpisodeList(series: Series, onPlay: (Entry) -> Unit) {
 }
 
 @Composable
-private fun SettingsScreen(prefs: Prefs, onSaved: () -> Unit) {
+private fun SettingsScreen(prefs: Prefs, onCheckUpdate: () -> Unit, onSaved: () -> Unit) {
     var m3u by remember { mutableStateOf(prefs.m3uUrl) }
     var osKey by remember { mutableStateOf(prefs.osKey) }
     var subdlKey by remember { mutableStateOf(prefs.subdlKey) }
@@ -323,7 +373,11 @@ private fun SettingsScreen(prefs: Prefs, onSaved: () -> Unit) {
             prefs.autoSubs = auto
             if (prefs.m3uUrl.isNotBlank()) onSaved()
         }) { Text("Spara och ladda om spellistan") }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onCheckUpdate) { Text("Sök efter uppdatering") }
         Spacer(Modifier.height(24.dp))
+        Text("Version ${Updater.currentVersion}", color = Muted)
+        Spacer(Modifier.height(8.dp))
         Text(
             "I spelaren: tryck UPP (eller Meny) för att välja, byta eller stänga av undertext.\n" +
                 "Bara filmer och serier läses in – live-kanaler hoppas över, så även stora listor går snabbt.",

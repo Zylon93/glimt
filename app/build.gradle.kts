@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+val buildNumber = (System.getenv("BUILD_NUMBER") ?: "1").toInt()
 
 android {
     namespace = "se.pontus.glimt"

@@ -14,6 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Versionsnummer = körningsnummer + 100 (arbetsflödet byttes ut vid 1.0.8)
+      - name: Sätt versionsnummer
+        run: echo "BUILD_NUMBER=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -37,7 +41,7 @@ jobs:
       - name: Publicera som release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Glimt 1.0.${{ github.run_number }}
+          tag_name: v1.0.${{ env.BUILD_NUMBER }}
+          name: Glimt 1.0.${{ env.BUILD_NUMBER }}
           files: glimt.apk
           make_latest: true

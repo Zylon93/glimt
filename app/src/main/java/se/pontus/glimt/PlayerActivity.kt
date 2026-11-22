@@ -126,6 +126,10 @@ class PlayerActivity : ComponentActivity() {
     private var searchJob: Job? = null
     private var extrasJob: Job? = null
     private var activeIndex = -1
+    private var cues by mutableStateOf<List<Cue>>(emptyList())
+    /** Undertextsynk i ms. Positivt = texten visas senare. */
+    private var subOffset by mutableLongStateOf(0L)
+    private var syncMode by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -195,6 +199,8 @@ class PlayerActivity : ComponentActivity() {
         query = Subtitles.queryFor(e.title, e.series, e.season, e.episode)
         results = emptyList()
         activeIndex = -1
+        cues = emptyList()
+        syncMode = false
         segments = emptyList()
         badges = emptyList()
         searchJob?.cancel()
@@ -358,7 +364,7 @@ class PlayerActivity : ComponentActivity() {
             while (true) {
                 position = player.currentPosition
                 duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
-                delay(500)
+                delay(100)
             }
         }
         // Dölj kontrollerna efter 5 sekunder utan knapptryck när filmen spelar
@@ -371,7 +377,12 @@ class PlayerActivity : ComponentActivity() {
         LaunchedEffect(overlay) {
             runCatching { if (overlay) playFocus.requestFocus() else rootFocus.requestFocus() }
         }
-        BackHandler(enabled = overlay) { overlay = false }
+        BackHandler(enabled = overlay || syncMode) {
+            if (syncMode) syncMode = false else overlay = false
+        }
+        LaunchedEffect(syncMode) {
+            if (syncMode) runCatching { rootFocus.requestFocus() } else prefs.subOffset = subOffset
+        }
 
         val segment = activeSegment()
 
@@ -386,6 +397,17 @@ class PlayerActivity : ComponentActivity() {
                     when {
                         code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> { togglePlay(); true }
                         code == KeyEvent.KEYCODE_MENU || code == KeyEvent.KEYCODE_CAPTIONS -> { showSubtitleMenu(); true }
+                        syncMode -> {
+                            when (ev.key) {
+                                Key.DirectionLeft -> subOffset -= 100
+                                Key.DirectionRight -> subOffset += 100
+                                Key.DirectionUp -> subOffset += 500
+                                Key.DirectionDown -> subOffset -= 500
+                                Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Back -> syncMode = false
+                                else -> return@onPreviewKeyEvent false
+                            }
+                            true
+                        }
                         overlay -> false // vanlig fokusnavigering bland knapparna
                         ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter -> {
                             if (segment != null) skip(segment) else overlay = true
@@ -413,7 +435,45 @@ class PlayerActivity : ComponentActivity() {
             if (buffering) {
                 CircularProgressIndicator(color = Color.White, modifier = Modifier.align(Alignment.Center).size(56.dp))
             }
-            if (overlay) Controls(playFocus)
+            // Egen undertextvisning (så att synken kan justeras direkt)
+            val line = if (cues.isEmpty()) null else Srt.at(cues, position, subOffset)
+            if (line != null) {
+                Text(
+                    line,
+                    color = Color.White,
+                    fontSize = 30.sp,
+                    lineHeight = 38.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = androidx.compose.ui.text.TextStyle(
+                        shadow = androidx.compose.ui.graphics.Shadow(Color.Black, Offset(2f, 2f), 6f)
+                    ),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(start = 80.dp, end = 80.dp, bottom = if (overlay) 230.dp else 56.dp)
+                        .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+            if (syncMode) {
+                Column(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 40.dp)
+                        .background(Color.Black.copy(alpha = 0.8f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 28.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("Undertextsynk: " + offsetLabel(), color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "◀ ▶ 0,1 s   ▲ ▼ 0,5 s   OK = klar\nTexten före ljudet? Tryck ▶ så visas den senare.",
+                        color = TextBright,
+                        fontSize = 15.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
+            if (overlay && !syncMode) Controls(playFocus)
             if (segment != null) {
                 Box(Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = if (overlay) 210.dp else 60.dp)) {
                     PillButton(skipLabel(segment), primary = !overlay) { skip(segment) }
@@ -658,6 +718,7 @@ class PlayerActivity : ComponentActivity() {
         val items = ArrayList<String>()
         items += if (activeIndex == -1) "✓ Av" else "Av"
         items += "Sök igen"
+        if (cues.isNotEmpty()) items += "Justera synk (nu ${offsetLabel()})"
         results.forEachIndexed { i, r -> items += (if (i == activeIndex) "✓ " else "") + r.label }
 
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -672,7 +733,8 @@ class PlayerActivity : ComponentActivity() {
                         results = emptyList()
                         startSearch(auto = false)
                     }
-                    else -> applyResult(which - 2)
+                    2 -> if (cues.isNotEmpty()) syncMode = true else applyResult(0)
+                    else -> applyResult(which - if (cues.isNotEmpty()) 3 else 2)
                 }
             }
             .show()
@@ -685,11 +747,12 @@ class PlayerActivity : ComponentActivity() {
             try {
                 val text = r.fetch()
                 if (forUrl != currentUrl) return@launch
-                val file = withContext(Dispatchers.IO) {
-                    val dir = File(cacheDir, "subs").apply { mkdirs() }
-                    File(dir, "sub_${System.currentTimeMillis()}.srt").also { it.writeText(text, Charsets.UTF_8) }
+                val parsed = withContext(Dispatchers.Default) { Srt.parse(text) }
+                if (parsed.isEmpty()) {
+                    toast("Undertexten gick inte att läsa")
+                    return@launch
                 }
-                setSubtitle(file)
+                setSubtitle(parsed)
                 activeIndex = index
                 toast("Undertext: ${r.label}")
             } catch (e: Exception) {
@@ -698,20 +761,18 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun setSubtitle(file: File?) {
-        val pos = player.currentPosition
-        val configs = if (file == null) emptyList() else listOf(
-            MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(file))
-                .setMimeType(MimeTypes.APPLICATION_SUBRIP)
-                .setLanguage(prefs.subLang)
-                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                .build()
-        )
+    /** Visar egna rader och stänger av inbäddade undertexter så att det inte blir dubbelt. */
+    private fun setSubtitle(list: List<Cue>?) {
+        cues = list.orEmpty()
+        subOffset = prefs.subOffset
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, file == null)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
-        player.setMediaItem(baseItem.buildUpon().setSubtitleConfigurations(configs).build(), pos)
-        player.prepare()
+    }
+
+    private fun offsetLabel(): String {
+        val s = subOffset / 1000.0
+        return (if (subOffset > 0) "+" else "") + String.format(Locale("sv", "SE"), "%.1f s", s)
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()

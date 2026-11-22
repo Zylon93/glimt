@@ -22,6 +22,11 @@ class Prefs(context: Context) {
         get() = p.getString("sub_lang", "sv").orEmpty().ifBlank { "sv" }
         set(v) { p.edit().putString("sub_lang", v.trim().lowercase()).apply() }
 
+    /** Senast använda undertextsynk i ms (positivt = texten senare). */
+    var subOffset: Long
+        get() = p.getLong("sub_offset", 0L)
+        set(v) { p.edit().putLong("sub_offset", v).apply() }
+
     var autoSubs: Boolean
         get() = p.getBoolean("auto_subs", true)
         set(v) { p.edit().putBoolean("auto_subs", v).apply() }

@@ -4,7 +4,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-const val USER_AGENT = "Glimt/1.0"
+const val USER_AGENT = "okhttp/4.12.0"
 
 object Net {
     /** Öppnar en anslutning och följer omdirigeringar, även http <-> https. */

@@ -19,11 +19,18 @@ jobs:
         run: |
           set -e
           P=app/src/main
-          mkdir -p $P/java/se/pontus/glimt $P/res/drawable
+          mkdir -p $P/java/se/pontus/glimt $P/res/drawable $P/res/xml
           # Flytta filer om de laddats upp platt i roten
           for f in *.kt; do [ -e "$f" ] && mv "$f" $P/java/se/pontus/glimt/; done
           [ -e AndroidManifest.xml ] && mv AndroidManifest.xml $P/
           for f in banner.xml ic_launcher.xml; do [ -e "$f" ] && mv "$f" $P/res/drawable/; done
+          # Resurs för installation av uppdateringar
+          cat > $P/res/xml/file_paths.xml <<'GLIMT_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <cache-path name="update" path="update/" />
+          </paths>
+          GLIMT_EOF
           # Byggfiler
           cat > settings.gradle.kts <<'GLIMT_EOF'
           pluginManagement {
@@ -73,10 +80,12 @@ jobs:
 
               defaultConfig {
                   applicationId = "se.pontus.glimt"
-                  minSdk = 23
+                  minSdk = 24
                   targetSdk = 35
                   versionCode = buildNumber
                   versionName = "1.0.$buildNumber"
+                  // Repot appen letar uppdateringar i, t.ex. "Zylon93/glimt". Sätts automatiskt av GitHub Actions.
+                  buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: ""}\"")
               }
 
               // Samma nyckel varje bygge, så att nya versioner kan installeras ovanpå gamla.
@@ -110,6 +119,7 @@ jobs:
               }
               buildFeatures {
                   compose = true
+                  buildConfig = true
               }
               lint {
                   checkReleaseBuilds = false
@@ -167,4 +177,3 @@ jobs:
           name: Glimt 1.0.${{ github.run_number }}
           files: glimt.apk
           make_latest: true
-

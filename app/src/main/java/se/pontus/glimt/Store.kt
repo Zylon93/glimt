@@ -29,9 +29,21 @@ object Store {
     /** Senast sedda först. */
     val history: StateFlow<List<Progress>> = _history
 
+    private val _hidden = MutableStateFlow<Set<String>>(emptySet())
+    /** Dolda språkgrupper ("p:DK") och kategorier ("c:<namn>"). */
+    val hidden: StateFlow<Set<String>> = _hidden
+
+    fun setHidden(keys: Set<String>) {
+        _hidden.value = keys
+        prefs.edit().putStringSet("hidden", HashSet(keys)).apply()
+    }
+
+    fun toggleHidden(key: String) = setHidden(if (key in _hidden.value) _hidden.value - key else _hidden.value + key)
+
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = context.getSharedPreferences("glimt_store", Context.MODE_PRIVATE)
+        _hidden.value = prefs.getStringSet("hidden", emptySet())?.toSet() ?: emptySet()
         _favMovies.value = readArray("fav_movies") { entryFromJson(it) }
         _favSeries.value = readArray("fav_series") { seriesFromJson(it) }
         _history.value = readArray("history") { o ->

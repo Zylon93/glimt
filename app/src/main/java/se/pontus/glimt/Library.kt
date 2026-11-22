@@ -54,6 +54,38 @@ class Library(
  * Läser en M3U-spellista rad för rad och behåller bara filmer och serier.
  * Live-kanaler hoppas över helt, vilket håller minnet nere även för enorma listor.
  */
+// ---------------------------------------------------------------- Dölja kategorier
+
+private val categoryPrefixRe by lazy { Regex("""^\s*[\|\[\(]?\s*([A-Za-z]{2,4})\s*[\|\]\)\-:]""") }
+
+/** "SE | Filmer" -> "SE", "|AR| Drama" -> "AR". Kategorier utan språkprefix hamnar i "Övrigt". */
+fun categoryPrefix(name: String): String =
+    categoryPrefixRe.find(name)?.groupValues?.get(1)?.uppercase() ?: "Övrigt"
+
+private val prefixNames = mapOf(
+    "SE" to "Svenska", "SV" to "Svenska", "SWE" to "Svenska", "NO" to "Norska", "NOR" to "Norska",
+    "DK" to "Danska", "DA" to "Danska", "FI" to "Finska", "FIN" to "Finska", "IS" to "Isländska",
+    "EN" to "Engelska", "ENG" to "Engelska", "UK" to "Engelska (UK)", "US" to "Engelska (US)",
+    "AR" to "Arabiska", "TR" to "Turkiska", "DE" to "Tyska", "GER" to "Tyska", "FR" to "Franska",
+    "ES" to "Spanska", "IT" to "Italienska", "NL" to "Holländska", "PL" to "Polska", "GR" to "Grekiska",
+    "PT" to "Portugisiska", "BR" to "Portugisiska (BR)", "RU" to "Ryska", "IN" to "Indiska", "HI" to "Hindi",
+    "KR" to "Koreanska", "JP" to "Japanska", "CN" to "Kinesiska", "AL" to "Albanska", "KU" to "Kurdiska",
+    "FA" to "Persiska", "IR" to "Persiska", "SO" to "Somaliska", "EXYU" to "Ex-Jugoslavien", "YU" to "Ex-Jugoslavien",
+    "RO" to "Rumänska", "HU" to "Ungerska", "CZ" to "Tjeckiska", "BG" to "Bulgariska", "UA" to "Ukrainska",
+    "PK" to "Pakistan", "AF" to "Afghanistan", "LAT" to "Latinamerika", "MULTI" to "Flerspråkigt",
+)
+
+fun prefixLabel(prefix: String): String = prefixNames[prefix]?.let { "$it ($prefix)" } ?: prefix
+
+/** Biblioteket utan dolda kategorier. Nycklar: "p:SE" = hela språkgruppen, "c:<namn>" = en kategori. */
+fun Library.filtered(hidden: Set<String>): Library {
+    if (hidden.isEmpty()) return this
+    fun visible(g: String) = "c:$g" !in hidden && "p:${categoryPrefix(g)}" !in hidden
+    val mg = movieGroups.filter { visible(it) }
+    val sg = seriesGroups.filter { visible(it) }
+    return Library(mg, mg.associateWith { movies[it].orEmpty() }, sg, sg.associateWith { series[it].orEmpty() })
+}
+
 object M3u {
     private val attrRe = Regex("""([\w-]+)="([^"]*)"""")
     private val episodeRe = Regex("""(?i)^(.*?)[\s._\-]*S(\d{1,2})[\s._\-]*E(\d{1,4})(?!\d)""")

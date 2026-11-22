@@ -90,6 +90,8 @@ private fun App(prefs: Prefs) {
     val state by Repo.state.collectAsState()
     var section by rememberSaveable { mutableStateOf(if (prefs.m3uUrl.isBlank()) Section.SETTINGS else Section.HOME) }
     var detail by remember { mutableStateOf<Detail?>(null) }
+    var showCategories by remember { mutableStateOf(false) }
+    val hidden by Store.hidden.collectAsState()
     val play: (Entry, Boolean) -> Unit = { e, resume -> activity.startActivity(PlayerActivity.intent(activity, e, resume)) }
     val open: (Detail) -> Unit = { detail = it }
 
@@ -99,7 +101,8 @@ private fun App(prefs: Prefs) {
         }
     }
     BackHandler(enabled = detail != null) { detail = null }
-    BackHandler(enabled = detail == null && section != Section.HOME) { section = Section.HOME }
+    BackHandler(enabled = detail == null && section != Section.HOME && !showCategories) { section = Section.HOME }
+    BackHandler(enabled = showCategories) { showCategories = false }
 
     // ---- Kraschrapport från förra körningen ----
     val crashFile = remember { java.io.File(appContext.filesDir, GlimtApp.CRASH_FILE) }
@@ -152,6 +155,7 @@ private fun App(prefs: Prefs) {
             onSelect = {
                 section = it
                 detail = null
+                showCategories = false
             },
             updateLabel = update?.let { updateStatus ?: "⬆  Uppdatera till ${it.versionName}" },
             onUpdate = startUpdate,
@@ -161,7 +165,9 @@ private fun App(prefs: Prefs) {
             when {
                 d is Detail.Movie -> MovieDetail(d.entry, play)
                 d is Detail.Show -> SeriesDetail(d.series, play)
-                section == Section.SETTINGS -> SettingsScreen(prefs, onCheckUpdate = checkUpdate) {
+                section == Section.SETTINGS && showCategories ->
+                    CategoryScreen((state as? LoadState.Ready)?.library)
+                section == Section.SETTINGS -> SettingsScreen(prefs, onCheckUpdate = checkUpdate, onCategories = { showCategories = true }) {
                     scope.launch { Repo.load(appContext, prefs.m3uUrl, forceDownload = true) }
                     section = Section.HOME
                 }
@@ -176,11 +182,12 @@ private fun App(prefs: Prefs) {
                     }
                     is LoadState.Failed -> Message("Kunde inte ladda spellistan:\n${s.message}")
                     is LoadState.Ready -> key(section) {
+                        val lib = remember(s.library, hidden) { s.library.filtered(hidden) }
                         when (section) {
-                            Section.HOME -> HomeScreen(s.library, play, open) { section = it }
-                            Section.SEARCH -> SearchScreen(s.library, onOpen = open)
-                            Section.MOVIES -> Browser(s.library, seriesMode = false, onOpen = open)
-                            Section.SERIES -> Browser(s.library, seriesMode = true, onOpen = open)
+                            Section.HOME -> HomeScreen(lib, play, open) { section = it }
+                            Section.SEARCH -> SearchScreen(lib, onOpen = open)
+                            Section.MOVIES -> Browser(lib, seriesMode = false, onOpen = open)
+                            Section.SERIES -> Browser(lib, seriesMode = true, onOpen = open)
                             Section.FAVORITES -> FavoritesScreen(open)
                             Section.HISTORY -> HistoryScreen(play)
                             Section.SETTINGS -> Unit
@@ -437,10 +444,93 @@ private fun HistoryScreen(onPlay: (Entry, Boolean) -> Unit) {
     }
 }
 
+// ---------------------------------------------------------------- Dölj kategorier
+
+@Composable
+private fun CategoryScreen(lib: Library?) {
+    if (lib == null) {
+        Message("Spellistan är inte inläst än.")
+        return
+    }
+    val hidden by Store.hidden.collectAsState()
+    val cats = remember(lib) {
+        (lib.movieGroups.map { it to (lib.movies[it]?.size ?: 0) } + lib.seriesGroups.map { it to (lib.series[it]?.size ?: 0) })
+            .groupBy({ it.first }, { it.second })
+            .map { (name, sizes) -> name to sizes.sum() }
+    }
+    val prefixes = remember(cats) {
+        cats.groupBy { categoryPrefix(it.first) }
+            .map { (p, list) -> p to list.sumOf { it.second } }
+            .sortedByDescending { it.second }
+    }
+    val keep = setOf("SE", "SV", "SWE", "EN", "ENG", "UK", "US", "Övrigt")
+
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 40.dp), contentPadding = PaddingValues(vertical = 24.dp)) {
+        item {
+            Column {
+                Text("Dölj språk och kategorier", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Dolda kategorier syns inte i Filmer, Serier, Sök eller på startsidan. Tryck OK för att växla. ✓ = visas, ✕ = dold.",
+                    color = Muted,
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    PillButton("Behåll bara svenska och engelska", primary = true) {
+                        Store.setHidden(prefixes.map { it.first }.filter { it !in keep }.map { "p:$it" }.toSet())
+                    }
+                    PillButton("Visa allt", primary = false) { Store.setHidden(emptySet()) }
+                }
+                SectionTitle("Språk och grupper")
+            }
+        }
+        items(prefixes.chunked(4)) { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { (p, n) ->
+                    Toggle("${prefixLabel(p)} · $n", hidden = "p:$p" in hidden, modifier = Modifier.weight(1f)) {
+                        Store.toggleHidden("p:$p")
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        item { SectionTitle("Enskilda kategorier") }
+        items(cats) { (name, n) ->
+            val byPrefix = "p:${categoryPrefix(name)}" in hidden
+            Toggle(
+                if (byPrefix) "$name · $n   (dold via språkgruppen)" else "$name · $n",
+                hidden = byPrefix || "c:$name" in hidden,
+                modifier = Modifier.fillMaxWidth(),
+            ) { if (!byPrefix) Store.toggleHidden("c:$name") }
+        }
+    }
+}
+
+@Composable
+private fun Toggle(label: String, hidden: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    FocusBox(onClick = onClick, modifier = modifier.padding(vertical = 3.dp), scale = 1.02f) { focused ->
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(if (focused) CardBg else Color.White.copy(alpha = 0.05f))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (hidden) "✕" else "✓",
+                color = if (hidden) Color(0xFFFF5A6A) else Color(0xFF4CD08A),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(28.dp),
+            )
+            Text(label, color = if (hidden) Muted else Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 // ---------------------------------------------------------------- Inställningar
 
 @Composable
-private fun SettingsScreen(prefs: Prefs, onCheckUpdate: () -> Unit, onSaved: () -> Unit) {
+private fun SettingsScreen(prefs: Prefs, onCheckUpdate: () -> Unit, onCategories: () -> Unit, onSaved: () -> Unit) {
     var m3u by remember { mutableStateOf(prefs.m3uUrl) }
     var osKey by remember { mutableStateOf(prefs.osKey) }
     var subdlKey by remember { mutableStateOf(prefs.subdlKey) }
@@ -477,6 +567,8 @@ private fun SettingsScreen(prefs: Prefs, onCheckUpdate: () -> Unit, onSaved: () 
             }) { Text("Spara och ladda om spellistan") }
             Button(onClick = onCheckUpdate) { Text("Sök efter uppdatering") }
         }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onCategories) { Text("Dölj språk och kategorier…") }
         Spacer(Modifier.height(24.dp))
         Text("Version ${Updater.currentVersion}", color = Muted)
         Spacer(Modifier.height(8.dp))

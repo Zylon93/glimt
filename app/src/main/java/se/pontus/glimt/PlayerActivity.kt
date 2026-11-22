@@ -35,19 +35,14 @@ import java.util.Locale
 class PlayerActivity : ComponentActivity() {
 
     companion object {
-        private const val EXTRA_URL = "url"
-        private const val EXTRA_TITLE = "title"
-        private const val EXTRA_SERIES = "series"
-        private const val EXTRA_SEASON = "season"
-        private const val EXTRA_EPISODE = "episode"
+        private const val EXTRA_ENTRY = "entry"
+        private const val EXTRA_RESUME = "resume"
 
-        fun intent(context: Context, e: Entry): Intent =
+        /** [resume] = fortsätt där man slutade (om det finns en sparad position). */
+        fun intent(context: Context, e: Entry, resume: Boolean = true): Intent =
             Intent(context, PlayerActivity::class.java)
-                .putExtra(EXTRA_URL, e.url)
-                .putExtra(EXTRA_TITLE, e.title)
-                .putExtra(EXTRA_SERIES, e.series)
-                .putExtra(EXTRA_SEASON, e.season)
-                .putExtra(EXTRA_EPISODE, e.episode)
+                .putExtra(EXTRA_ENTRY, Store.entryToJson(e).toString())
+                .putExtra(EXTRA_RESUME, resume)
     }
 
     private lateinit var prefs: Prefs
@@ -55,6 +50,7 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var playerView: PlayerView
     private lateinit var baseItem: MediaItem
     private lateinit var query: SubQuery
+    private lateinit var entry: Entry
 
     private var results: List<SubResult> = emptyList()
     private var searchJob: Job? = null
@@ -65,14 +61,11 @@ class PlayerActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         prefs = Prefs(this)
 
-        val url = intent.getStringExtra(EXTRA_URL) ?: return finish()
-        val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
-        query = Subtitles.queryFor(
-            title,
-            intent.getStringExtra(EXTRA_SERIES),
-            intent.getIntExtra(EXTRA_SEASON, 0),
-            intent.getIntExtra(EXTRA_EPISODE, 0),
-        )
+        val json = intent.getStringExtra(EXTRA_ENTRY) ?: return finish()
+        entry = Store.entryFromJson(org.json.JSONObject(json))
+        val url = entry.url
+        val title = entry.title
+        query = Subtitles.queryFor(title, entry.series, entry.season, entry.episode)
         File(cacheDir, "subs").deleteRecursively()
 
         val http = DefaultHttpDataSource.Factory()
@@ -104,7 +97,13 @@ class PlayerActivity : ComponentActivity() {
             .setUri(url)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(title).build())
             .build()
-        player.setMediaItem(baseItem)
+        val saved = if (intent.getBooleanExtra(EXTRA_RESUME, true)) Store.progressFor(url) else null
+        if (saved != null && saved.position > 30_000) {
+            player.setMediaItem(baseItem, saved.position)
+            toast("Fortsätter där du slutade")
+        } else {
+            player.setMediaItem(baseItem)
+        }
         player.prepare()
         player.playWhenReady = true
 
@@ -128,7 +127,16 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        player.pause()
+        if (::player.isInitialized) {
+            saveProgress()
+            player.pause()
+        }
+    }
+
+    private fun saveProgress() {
+        val duration = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L
+        val ended = player.playbackState == Player.STATE_ENDED
+        Store.saveProgress(entry, if (ended) duration else player.currentPosition, duration)
     }
 
     override fun onDestroy() {

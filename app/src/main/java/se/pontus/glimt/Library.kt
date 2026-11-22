@@ -19,6 +19,10 @@ data class Entry(
     val series: String? = null,
     val season: Int = 0,
     val episode: Int = 0,
+    /** Xtream stream_id för filmer (används för att hämta handling, bakgrundsbild m.m.). */
+    val xtreamId: String? = null,
+    /** När titeln lades till hos leverantören (unix-sekunder), 0 om okänt. */
+    val added: Long = 0,
 )
 
 data class Series(
@@ -38,6 +42,12 @@ class Library(
 ) {
     val allMovies: List<Entry> by lazy { movies.values.flatten() }
     val allSeries: List<Series> by lazy { series.values.flatten() }
+
+    /** Senast tillagda filmer först. */
+    val newestMovies: List<Entry> by lazy {
+        if (allMovies.any { it.added > 0 }) allMovies.sortedByDescending { it.added }.take(60)
+        else allMovies.takeLast(60).reversed()
+    }
 }
 
 /**

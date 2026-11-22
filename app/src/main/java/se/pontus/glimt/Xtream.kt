@@ -56,7 +56,12 @@ object Xtream {
             val title = o["name"].orEmpty().ifBlank { "Okänd titel" }
             val logo = o["stream_icon"]?.takeIf { it.startsWith("http") }
             movies.getOrPut(group) { ArrayList() }
-                .add(Entry(title, group, logo, acc.movieUrl(id, o["container_extension"].orEmpty()), Kind.MOVIE))
+                .add(
+                    Entry(
+                        title, group, logo, acc.movieUrl(id, o["container_extension"].orEmpty()), Kind.MOVIE,
+                        xtreamId = id, added = o["added"]?.toLongOrNull() ?: 0L,
+                    )
+                )
         }
         movies.entries.removeAll { it.value.isEmpty() }
 
@@ -76,9 +81,10 @@ object Xtream {
         return Library(movies.keys.toList(), movies, series.keys.toList(), series)
     }
 
-    suspend fun episodes(acc: XtreamAccount, s: Series): List<Entry> = withContext(Dispatchers.IO) {
+    suspend fun seriesInfo(acc: XtreamAccount, s: Series): Pair<Details?, List<Entry>> = withContext(Dispatchers.IO) {
         val json = JSONObject(Net.bytes(acc.api("get_series_info", "&series_id=${s.xtreamId}")).decodeToString())
-        val bySeason = json.optJSONObject("episodes") ?: return@withContext emptyList()
+        val details = json.optJSONObject("info")?.let { parseDetails(it) }
+        val bySeason = json.optJSONObject("episodes") ?: return@withContext details to emptyList()
         val out = ArrayList<Entry>()
         for (key in bySeason.keys()) {
             val arr = bySeason.optJSONArray(key) ?: continue
@@ -95,7 +101,43 @@ object Xtream {
                 )
             }
         }
-        out.sortedWith(compareBy({ it.season }, { it.episode }))
+        details to out.sortedWith(compareBy({ it.season }, { it.episode }))
+    }
+
+    private val vodCache = HashMap<String, Details>()
+
+    /** Handling, bakgrundsbild, betyg m.m. för en film. Cachas i minnet. */
+    suspend fun vodInfo(acc: XtreamAccount, vodId: String): Details? {
+        synchronized(vodCache) { vodCache[vodId] }?.let { return it }
+        return withContext(Dispatchers.IO) {
+            val json = JSONObject(Net.bytes(acc.api("get_vod_info", "&vod_id=$vodId")).decodeToString())
+            val info = json.optJSONObject("info") ?: return@withContext null
+            parseDetails(info).also { d -> synchronized(vodCache) { vodCache[vodId] = d } }
+        }
+    }
+
+    private fun parseDetails(info: JSONObject): Details {
+        val backdrop = when (val b = info.opt("backdrop_path")) {
+            is org.json.JSONArray -> if (b.length() > 0) b.optString(0) else ""
+            is String -> b
+            else -> ""
+        }.takeIf { it.startsWith("http") }
+        val date = info.optString("releasedate").ifBlank { info.optString("releaseDate") }
+        val duration = info.optString("duration").let { d ->
+            // "01:39:00" -> "1 h 39 min"
+            val parts = d.split(":").mapNotNull { it.toIntOrNull() }
+            if (parts.size >= 2 && (parts[0] > 0 || parts[1] > 0)) {
+                if (parts[0] > 0) "${parts[0]} h ${parts[1]} min" else "${parts[1]} min"
+            } else ""
+        }
+        return Details(
+            plot = info.optString("plot").ifBlank { info.optString("description") }.trim(),
+            backdrop = backdrop,
+            rating = info.optString("rating").toDoubleOrNull()?.takeIf { it > 0 }?.let { "%.1f".format(it) },
+            year = Regex("""(19|20)\d{2}""").find(date)?.value,
+            duration = duration.ifBlank { null },
+            genre = info.optString("genre").ifBlank { null },
+        )
     }
 
     // ---------- Hjälpfunktioner ----------

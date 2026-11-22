@@ -7,17 +7,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,19 +25,18 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,48 +50,35 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import kotlinx.coroutines.launch
-
-private val Accent = Color(0xFF5CC8FF)
-private val Bg = Color(0xFF0F1115)
-private val CardBg = Color(0xFF1C2028)
-private val Muted = Color(0xFF8A93A3)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Store.init(this)
         val prefs = Prefs(this)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Bg)) {
+            MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = CardBg)) {
                 Surface(Modifier.fillMaxSize(), color = Bg) { App(prefs) }
             }
         }
     }
 }
 
-private enum class Tab(val label: String) { MOVIES("Filmer"), SERIES("Serier"), SETTINGS("Inställningar") }
+internal enum class Section(val label: String, val icon: String) {
+    HOME("Hem", "⌂"),
+    MOVIES("Filmer", "▶"),
+    SERIES("Serier", "▤"),
+    FAVORITES("Favoriter", "♥"),
+    HISTORY("Historik", "↺"),
+    SETTINGS("Inställningar", "⚙"),
+}
 
 @Composable
 private fun App(prefs: Prefs) {
@@ -105,18 +86,20 @@ private fun App(prefs: Prefs) {
     val appContext = activity.applicationContext
     val scope = rememberCoroutineScope()
     val state by Repo.state.collectAsState()
-    var tab by rememberSaveable { mutableStateOf(if (prefs.m3uUrl.isBlank()) Tab.SETTINGS else Tab.MOVIES) }
-    var openSeries by remember { mutableStateOf<Series?>(null) }
-    val play: (Entry) -> Unit = { activity.startActivity(PlayerActivity.intent(activity, it)) }
+    var section by rememberSaveable { mutableStateOf(if (prefs.m3uUrl.isBlank()) Section.SETTINGS else Section.HOME) }
+    var detail by remember { mutableStateOf<Detail?>(null) }
+    val play: (Entry, Boolean) -> Unit = { e, resume -> activity.startActivity(PlayerActivity.intent(activity, e, resume)) }
+    val open: (Detail) -> Unit = { detail = it }
 
     LaunchedEffect(Unit) {
         if (Repo.state.value is LoadState.Idle && prefs.m3uUrl.isNotBlank()) {
             Repo.load(appContext, prefs.m3uUrl, forceDownload = false)
         }
     }
-    BackHandler(enabled = openSeries != null) { openSeries = null }
+    BackHandler(enabled = detail != null) { detail = null }
+    BackHandler(enabled = detail == null && section != Section.HOME) { section = Section.HOME }
 
-    // ---- Visa kraschrapport från förra körningen ----
+    // ---- Kraschrapport från förra körningen ----
     val crashFile = remember { java.io.File(appContext.filesDir, GlimtApp.CRASH_FILE) }
     var crash by remember { mutableStateOf(crashFile.takeIf { it.exists() }?.readText()) }
     crash?.let { report ->
@@ -124,17 +107,11 @@ private fun App(prefs: Prefs) {
             onDismissRequest = { crashFile.delete(); crash = null },
             confirmButton = { TextButton(onClick = { crashFile.delete(); crash = null }) { Text("Stäng") } },
             title = { Text("Appen kraschade förra gången") },
-            text = {
-                Text(
-                    report.take(2500),
-                    fontSize = 11.sp,
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                )
-            },
+            text = { Text(report.take(2500), fontSize = 11.sp, modifier = Modifier.verticalScroll(rememberScrollState())) },
         )
     }
 
-    // ---- Automatisk uppdatering från GitHub ----
+    // ---- Uppdatering från GitHub ----
     var update by remember { mutableStateOf<Updater.Release?>(null) }
     var updateStatus by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { update = runCatching { Updater.check() }.getOrNull() }
@@ -144,7 +121,7 @@ private fun App(prefs: Prefs) {
             scope.launch {
                 try {
                     updateStatus = "Laddar ner…"
-                    val file = Updater.download(appContext, release) { pct -> updateStatus = "Laddar ner… $pct %" }
+                    val file = Updater.download(appContext, release) { pct -> updateStatus = "Laddar ner $pct %" }
                     updateStatus = null
                     Updater.install(activity as Activity, file)
                 } catch (e: Exception) {
@@ -161,112 +138,149 @@ private fun App(prefs: Prefs) {
             val msg = when {
                 result.isFailure -> "Kunde inte kolla efter uppdatering: ${result.exceptionOrNull()?.message}"
                 update == null -> "Du har senaste versionen (${Updater.currentVersion})"
-                else -> "Ny version ${update?.versionName} finns – tryck på knappen uppe till höger"
+                else -> "Ny version ${update?.versionName} finns – knappen ligger längst ner i menyn"
             }
             Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 24.dp)) {
-        TopBar(tab, onSelect = {
-            tab = it
-            openSeries = null
-        }) {
-            val release = update
-            if (release != null) {
-                FocusBox(onClick = startUpdate) {
+    Row(Modifier.fillMaxSize()) {
+        Sidebar(
+            current = section,
+            onSelect = {
+                section = it
+                detail = null
+            },
+            updateLabel = update?.let { updateStatus ?: "⬆  Uppdatera till ${it.versionName}" },
+            onUpdate = startUpdate,
+        )
+        Box(Modifier.weight(1f).fillMaxHeight()) {
+            val d = detail
+            when {
+                d is Detail.Movie -> MovieDetail(d.entry, play)
+                d is Detail.Show -> SeriesDetail(d.series, play)
+                section == Section.SETTINGS -> SettingsScreen(prefs, onCheckUpdate = checkUpdate) {
+                    scope.launch { Repo.load(appContext, prefs.m3uUrl, forceDownload = true) }
+                    section = Section.HOME
+                }
+                else -> when (val s = state) {
+                    LoadState.Idle -> Message("Lägg in din M3U-länk under Inställningar.")
+                    is LoadState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = Accent)
+                            Spacer(Modifier.height(16.dp))
+                            Text(s.message, color = TextBright)
+                        }
+                    }
+                    is LoadState.Failed -> Message("Kunde inte ladda spellistan:\n${s.message}")
+                    is LoadState.Ready -> key(section) {
+                        when (section) {
+                            Section.HOME -> HomeScreen(s.library, play, open) { section = it }
+                            Section.MOVIES -> Browser(s.library, seriesMode = false, onOpen = open)
+                            Section.SERIES -> Browser(s.library, seriesMode = true, onOpen = open)
+                            Section.FAVORITES -> FavoritesScreen(open)
+                            Section.HISTORY -> HistoryScreen(play)
+                            Section.SETTINGS -> Unit
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Meny
+
+@Composable
+private fun Sidebar(current: Section, onSelect: (Section) -> Unit, updateLabel: String?, onUpdate: () -> Unit) {
+    Column(
+        Modifier
+            .width(220.dp)
+            .fillMaxHeight()
+            .background(SideBg)
+            .padding(horizontal = 14.dp, vertical = 24.dp)
+    ) {
+        Text(
+            "Glimt",
+            color = Accent,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 12.dp, bottom = 28.dp),
+        )
+        Section.entries.forEach { s ->
+            val selected = s == current
+            FocusBox(onClick = { onSelect(s) }, modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), scale = 1.03f) { focused ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(
+                            when {
+                                selected -> Color.White
+                                focused -> CardBg
+                                else -> Color.Transparent
+                            }
+                        )
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(s.icon, color = if (selected) Color.Black else Muted, fontSize = 18.sp, modifier = Modifier.width(30.dp))
                     Text(
-                        updateStatus ?: "Uppdatera till ${release.versionName}",
-                        modifier = Modifier.background(Accent).padding(horizontal = 18.dp, vertical = 8.dp),
-                        color = Color.Black,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
+                        s.label,
+                        color = if (selected) Color.Black else TextBright,
+                        fontSize = 17.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
-        val series = openSeries
-        when {
-            tab == Tab.SETTINGS -> SettingsScreen(prefs, onCheckUpdate = checkUpdate) {
-                scope.launch { Repo.load(appContext, prefs.m3uUrl, forceDownload = true) }
-                tab = Tab.MOVIES
-            }
-            series != null -> EpisodeList(series, play)
-            else -> when (val s = state) {
-                LoadState.Idle -> Message("Lägg in din M3U-länk under Inställningar.")
-                is LoadState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Accent)
-                        Spacer(Modifier.height(16.dp))
-                        Text(s.message, color = Color.White)
-                    }
-                }
-                is LoadState.Failed -> Message("Kunde inte ladda spellistan:\n${s.message}")
-                is LoadState.Ready -> key(tab) {
-                    Browser(s.library, seriesMode = tab == Tab.SERIES, onPlay = play, onOpenSeries = { openSeries = it })
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TopBar(current: Tab, onSelect: (Tab) -> Unit, trailing: @Composable () -> Unit) {
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Glimt", color = Accent, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.width(32.dp))
-        Tab.entries.forEachIndexed { i, t ->
-            val base = if (i == 0) Modifier.focusRequester(first) else Modifier
-            FocusBox(onClick = { onSelect(t) }, modifier = base) { focused ->
+        Spacer(Modifier.weight(1f))
+        if (updateLabel != null) {
+            FocusBox(onClick = onUpdate, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    t.label,
-                    modifier = Modifier
-                        .background(if (t == current) CardBg else Color.Transparent)
-                        .padding(horizontal = 18.dp, vertical = 8.dp),
-                    color = if (focused || t == current) Color.White else Muted,
-                    fontSize = 18.sp,
+                    updateLabel,
+                    modifier = Modifier.fillMaxWidth().background(Accent).padding(horizontal = 14.dp, vertical = 12.dp),
+                    color = Color.Black,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
                 )
             }
-            Spacer(Modifier.width(8.dp))
         }
-        Spacer(Modifier.weight(1f))
-        trailing()
     }
 }
 
+// ---------------------------------------------------------------- Filmer / Serier
+
 @Composable
-private fun Browser(lib: Library, seriesMode: Boolean, onPlay: (Entry) -> Unit, onOpenSeries: (Series) -> Unit) {
+private fun Browser(lib: Library, seriesMode: Boolean, onOpen: (Detail) -> Unit) {
     val groups = if (seriesMode) lib.seriesGroups else lib.movieGroups
     if (groups.isEmpty()) {
         Message(if (seriesMode) "Inga serier hittades i spellistan." else "Inga filmer hittades i spellistan.")
         return
     }
-    var selected by remember { mutableStateOf(groups.first()) }
+    val favMovies by Store.favMovies.collectAsState()
+    var selected by rememberSaveable(seriesMode) { mutableStateOf(groups.first()) }
     var search by remember { mutableStateOf("") }
     val term = search.trim()
 
-    Row(Modifier.fillMaxSize()) {
-        Column(Modifier.width(280.dp).fillMaxHeight()) {
+    Row(Modifier.fillMaxSize().padding(top = 24.dp, start = 20.dp)) {
+        Column(Modifier.width(270.dp).fillMaxHeight()) {
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
                 singleLine = true,
-                placeholder = { Text("Sök…") },
+                placeholder = { Text(if (seriesMode) "Sök serie…" else "Sök film…") },
                 modifier = Modifier.fillMaxWidth().dpadEscape(),
             )
             Spacer(Modifier.height(12.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 items(groups) { g ->
                     val active = g == selected && term.length < 2
-                    FocusBox(onClick = { selected = g; search = "" }, modifier = Modifier.fillMaxWidth()) { focused ->
+                    FocusBox(onClick = { selected = g; search = "" }, modifier = Modifier.fillMaxWidth(), scale = 1.03f) { focused ->
                         Text(
                             g,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(if (active) CardBg else Color.Transparent)
+                                .background(if (active) CardBg else if (focused) CardBg.copy(alpha = 0.6f) else Color.Transparent)
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                             color = if (focused || active) Color.White else Muted,
                             maxLines = 1,
@@ -276,126 +290,74 @@ private fun Browser(lib: Library, seriesMode: Boolean, onPlay: (Entry) -> Unit, 
                 }
             }
         }
-        Spacer(Modifier.width(24.dp))
+        Spacer(Modifier.width(20.dp))
         if (seriesMode) {
             val list = remember(selected, term) {
                 if (term.length >= 2) lib.allSeries.filter { it.name.contains(term, ignoreCase = true) }.take(500)
                 else lib.series[selected].orEmpty()
             }
-            PosterGrid(
-                list,
-                title = { it.name },
-                logo = { it.logo },
-                caption = { if (it.xtreamId != null) null else "${it.episodes.size} avsnitt" },
-                onClick = onOpenSeries,
-            )
+            Grid(list, emptyText = "Inga serier här.") { s ->
+                PosterCard(s.name, s.logo, if (s.xtreamId == null) "${s.episodes.size} avsnitt" else null) { onOpen(Detail.Show(s)) }
+            }
         } else {
             val list = remember(selected, term) {
                 if (term.length >= 2) lib.allMovies.filter { it.title.contains(term, ignoreCase = true) }.take(500)
                 else lib.movies[selected].orEmpty()
             }
-            PosterGrid(list, title = { it.title }, logo = { it.logo }, caption = { null }, onClick = onPlay)
+            Grid(list, emptyText = "Inga filmer här.") { e ->
+                PosterCard(e.title, e.logo, null, favorite = favMovies.any { it.url == e.url }) { onOpen(Detail.Movie(e)) }
+            }
         }
     }
 }
 
 @Composable
-private fun <T> PosterGrid(
-    list: List<T>,
-    title: (T) -> String,
-    logo: (T) -> String?,
-    caption: (T) -> String?,
-    onClick: (T) -> Unit,
-) {
+private fun <T> Grid(list: List<T>, emptyText: String, minWidth: Int = 150, card: @Composable (T) -> Unit) {
     if (list.isEmpty()) {
-        Message("Inget att visa här.")
+        Message(emptyText)
         return
     }
-    val context = LocalContext.current
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(150.dp),
-        contentPadding = PaddingValues(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        columns = GridCells.Adaptive(minWidth.dp),
+        contentPadding = PaddingValues(start = 8.dp, end = 28.dp, top = 8.dp, bottom = 40.dp),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        items(list) { item ->
-            Column {
-                FocusBox(onClick = { onClick(item) }, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
-                    Box(Modifier.fillMaxSize().background(CardBg), contentAlignment = Alignment.Center) {
-                        val url = logo(item)
-                        if (url != null) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context).data(url).size(300, 450).build(),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else {
-                            Text(title(item), Modifier.padding(8.dp), textAlign = TextAlign.Center, color = Muted)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(title(item), maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = Color(0xFFD8DEE8))
-                caption(item)?.let { Text(it, fontSize = 11.sp, color = Muted) }
+        items(list) { card(it) }
+    }
+}
+
+// ---------------------------------------------------------------- Favoriter / Historik
+
+@Composable
+private fun FavoritesScreen(onOpen: (Detail) -> Unit) {
+    val movies by Store.favMovies.collectAsState()
+    val series by Store.favSeries.collectAsState()
+    Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 12.dp)) {
+        SectionTitle("Favoriter", "Lägg till med ♡ på en film eller serie")
+        val all: List<Detail> = series.map { Detail.Show(it) } + movies.map { Detail.Movie(it) }
+        Grid(all, emptyText = "Inga favoriter än.\nÖppna en film eller serie och tryck ♡ Favorit.") { d ->
+            when (d) {
+                is Detail.Movie -> PosterCard(d.entry.title, d.entry.logo, "Film") { onOpen(d) }
+                is Detail.Show -> PosterCard(d.series.name, d.series.logo, "Serie") { onOpen(d) }
             }
         }
     }
 }
 
 @Composable
-private fun EpisodeList(series: Series, onPlay: (Entry) -> Unit) {
-    var episodes by remember(series) { mutableStateOf(series.episodes) }
-    var error by remember(series) { mutableStateOf<String?>(null) }
-    val first = remember { FocusRequester() }
-    LaunchedEffect(series) {
-        val acc = Repo.account
-        if (episodes.isEmpty() && series.xtreamId != null && acc != null) {
-            try {
-                episodes = Xtream.episodes(acc, series)
-                if (episodes.isEmpty()) error = "Inga avsnitt hittades."
-            } catch (e: Exception) {
-                error = "Kunde inte hämta avsnitten: ${e.message}"
-            }
-        }
-    }
-    LaunchedEffect(episodes) { if (episodes.isNotEmpty()) runCatching { first.requestFocus() } }
-
-    Column(Modifier.fillMaxSize()) {
-        Text(series.name, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text(
-            if (episodes.isEmpty()) "Tillbaka-knappen går ur serien"
-            else "${episodes.size} avsnitt · Tillbaka-knappen går ur serien",
-            color = Muted,
-        )
-        Spacer(Modifier.height(16.dp))
-        val err = error
-        when {
-            err != null -> Message(err)
-            episodes.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Accent)
-            }
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(episodes) { i, e ->
-                    val label = if (e.season > 0) "S%02d E%02d".format(e.season, e.episode) else ""
-                    val base = if (i == 0) Modifier.focusRequester(first) else Modifier
-                    FocusBox(onClick = { onPlay(e) }, modifier = base.fillMaxWidth()) { focused ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(if (focused) CardBg else Color(0xFF161A21))
-                                .padding(horizontal = 18.dp, vertical = 12.dp)
-                        ) {
-                            Text(label, color = Accent, modifier = Modifier.width(110.dp))
-                            Text(e.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
+private fun HistoryScreen(onPlay: (Entry, Boolean) -> Unit) {
+    val history by Store.history.collectAsState()
+    Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 12.dp)) {
+        SectionTitle("Fortsätt titta", "Färdigsedda titlar försvinner automatiskt")
+        Grid(history, emptyText = "Du har inte börjat titta på något än.", minWidth = 250) { p ->
+            ContinueCard(p) { onPlay(p.entry, true) }
         }
     }
 }
+
+// ---------------------------------------------------------------- Inställningar
 
 @Composable
 private fun SettingsScreen(prefs: Prefs, onCheckUpdate: () -> Unit, onSaved: () -> Unit) {
@@ -405,8 +367,16 @@ private fun SettingsScreen(prefs: Prefs, onCheckUpdate: () -> Unit, onSaved: () 
     var lang by remember { mutableStateOf(prefs.subLang) }
     var auto by remember { mutableStateOf(prefs.autoSubs) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).widthIn(max = 900.dp)) {
-        Field("M3U-länk", m3u, "http://…") { m3u = it }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 40.dp, vertical = 28.dp)
+            .widthIn(max = 900.dp)
+    ) {
+        Text("Inställningar", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(16.dp))
+        Field("M3U-länk", m3u, "http://…/get.php?username=…") { m3u = it }
         Field("OpenSubtitles API-nyckel", osKey, "Gratis: opensubtitles.com → API consumers") { osKey = it }
         Field("SubDL API-nyckel", subdlKey, "Gratis: subdl.com → Account → API") { subdlKey = it }
         Field("Undertextspråk (språkkod)", lang, "sv") { lang = it }
@@ -416,22 +386,22 @@ private fun SettingsScreen(prefs: Prefs, onCheckUpdate: () -> Unit, onSaved: () 
             Text("Hämta undertext automatiskt när något startar", color = Color.White)
         }
         Spacer(Modifier.height(16.dp))
-        Button(onClick = {
-            prefs.m3uUrl = m3u
-            prefs.osKey = osKey
-            prefs.subdlKey = subdlKey
-            prefs.subLang = lang.ifBlank { "sv" }
-            prefs.autoSubs = auto
-            if (prefs.m3uUrl.isNotBlank()) onSaved()
-        }) { Text("Spara och ladda om spellistan") }
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = onCheckUpdate) { Text("Sök efter uppdatering") }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(onClick = {
+                prefs.m3uUrl = m3u
+                prefs.osKey = osKey
+                prefs.subdlKey = subdlKey
+                prefs.subLang = lang.ifBlank { "sv" }
+                prefs.autoSubs = auto
+                if (prefs.m3uUrl.isNotBlank()) onSaved()
+            }) { Text("Spara och ladda om spellistan") }
+            Button(onClick = onCheckUpdate) { Text("Sök efter uppdatering") }
+        }
         Spacer(Modifier.height(24.dp))
         Text("Version ${Updater.currentVersion}", color = Muted)
         Spacer(Modifier.height(8.dp))
         Text(
-            "I spelaren: tryck UPP (eller Meny) för att välja, byta eller stänga av undertext.\n" +
-                "Bara filmer och serier läses in – live-kanaler hoppas över, så även stora listor går snabbt.",
+            "I spelaren: tryck UPP (eller Meny) för att välja, byta eller stänga av undertext.",
             color = Muted,
         )
     }
@@ -447,48 +417,4 @@ private fun Field(label: String, value: String, hint: String, onChange: (String)
         singleLine = true,
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).dpadEscape(),
     )
-}
-
-@Composable
-private fun Message(text: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = Color.White, textAlign = TextAlign.Center, fontSize = 18.sp)
-    }
-}
-
-/** Ett fokuserbart kort som lyser upp när fjärrkontrollen står på det. */
-@Composable
-private fun FocusBox(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(8.dp),
-    content: @Composable (focused: Boolean) -> Unit,
-) {
-    val source = remember { MutableInteractionSource() }
-    val focused by source.collectIsFocusedAsState()
-    Box(
-        modifier
-            .graphicsLayer {
-                val s = if (focused) 1.05f else 1f
-                scaleX = s
-                scaleY = s
-            }
-            .clip(shape)
-            .then(if (focused) Modifier.border(3.dp, Accent, shape) else Modifier)
-            .clickable(interactionSource = source, indication = null, onClick = onClick)
-    ) { content(focused) }
-}
-
-/** Låter fjärrkontrollens upp/ner flytta fokus ut ur textfält. */
-@Composable
-private fun Modifier.dpadEscape(): Modifier {
-    val focusManager = LocalFocusManager.current
-    return onPreviewKeyEvent { e ->
-        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-        when (e.key) {
-            Key.DirectionDown -> focusManager.moveFocus(FocusDirection.Down)
-            Key.DirectionUp -> focusManager.moveFocus(FocusDirection.Up)
-            else -> false
-        }
-    }
 }

@@ -9,6 +9,7 @@ import java.io.File
 class GlimtApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        Store.init(this)
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {

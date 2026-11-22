@@ -25,11 +25,11 @@ object Subtitles {
     private const val OS_API = "https://api.opensubtitles.com/api/v1"
 
     // "SE - ", "|SE| ", "[EN] ", "NF: " m.m. som IPTV-leverantörer sätter före titeln
-    private val prefixRe = Regex("""^\s*(?:[|\[(]\s*[A-Za-z0-9+]{2,4}\s*[|\])]|[A-Z]{2,3}\s*[-:|])\s*""")
-    private val parenYearRe = Regex("""[(\[]\s*((?:19|20)\d{2})\s*[)\]]""")
-    private val trailingYearRe = Regex("""[\s\-.]((?:19|20)\d{2})\s*$""")
-    private val tagRe = Regex("""\[[^\]]*]|\{[^}]*}""")
-    private val qualityRe = Regex("""(?i)\b(4k|uhd|fhd|hd|sd|hevc|h\.?26[45]|x26[45]|multi|dual|1080p|720p|2160p)\b""")
+    private val prefixRe by lazy { Regex("""^\s*(?:[|\[\(]\s*[A-Za-z0-9+]{2,4}\s*[|\]\)]|[A-Z]{2,3}\s*[\-:|])\s*""") }
+    private val parenYearRe by lazy { Regex("""[\(\[]\s*((?:19|20)\d{2})\s*[\)\]]""") }
+    private val trailingYearRe by lazy { Regex("""[\s\-.]((?:19|20)\d{2})\s*$""") }
+    private val tagRe by lazy { Regex("""\[[^\]]*\]|\{[^\}]*\}""") }
+    private val qualityRe by lazy { Regex("""(?i)\b(4k|uhd|fhd|hd|sd|hevc|h\.?26[45]|x26[45]|multi|dual|1080p|720p|2160p)\b""") }
 
     fun clean(raw: String): Pair<String, Int?> {
         var t = raw
@@ -52,7 +52,13 @@ object Subtitles {
         return t.ifBlank { raw.trim() } to year
     }
 
-    fun queryFor(title: String, series: String?, season: Int, episode: Int): SubQuery =
+    fun queryFor(title: String, series: String?, season: Int, episode: Int): SubQuery = try {
+        buildQuery(title, series, season, episode)
+    } catch (e: Exception) {
+        SubQuery(series ?: title, null, if (season > 0) season else null, if (season > 0) episode else null)
+    }
+
+    private fun buildQuery(title: String, series: String?, season: Int, episode: Int): SubQuery =
         if (series != null && season > 0) {
             val (name, year) = clean(series)
             SubQuery(name, year, season, episode)

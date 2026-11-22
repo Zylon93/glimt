@@ -14,11 +14,18 @@ class GlimtApp : Application() {
             runCatching {
                 File(filesDir, CRASH_FILE).writeText(
                     "Glimt ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE} · ${Build.MANUFACTURER} ${Build.MODEL}\n\n" +
+                        "Grundorsak:\n" + rootCause(error) + "\n\nHela rapporten:\n" +
                         Log.getStackTraceString(error)
                 )
             }
             previous?.uncaughtException(thread, error)
         }
+    }
+
+    private fun rootCause(error: Throwable): String {
+        var e = error
+        while (e.cause != null && e.cause !== e) e = e.cause!!
+        return e.toString() + "\n" + e.stackTrace.take(6).joinToString("\n") { "  at $it" }
     }
 
     companion object {

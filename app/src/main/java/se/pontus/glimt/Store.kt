@@ -42,9 +42,19 @@ object Store {
 
     fun toggleHidden(key: String) = setHidden(if (key in _hidden.value) _hidden.value - key else _hidden.value + key)
 
+    private val _showAdult = MutableStateFlow(false)
+    /** Visa kategorier med vuxeninnehåll (av som standard). */
+    val showAdult: StateFlow<Boolean> = _showAdult
+
+    fun setShowAdult(v: Boolean) {
+        _showAdult.value = v
+        prefs.edit().putBoolean("show_adult", v).apply()
+    }
+
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = context.getSharedPreferences("glimt_store", Context.MODE_PRIVATE)
+        _showAdult.value = prefs.getBoolean("show_adult", false)
         _hidden.value = prefs.getStringSet("hidden", emptySet())?.toSet() ?: emptySet()
         _favMovies.value = readArray("fav_movies") { entryFromJson(it) }
         _favSeries.value = readArray("fav_series") { seriesFromJson(it) }

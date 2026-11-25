@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -114,6 +115,7 @@ private fun App(prefs: Prefs) {
     var detail by remember { mutableStateOf<Detail?>(null) }
     var showCategories by remember { mutableStateOf(false) }
     val hidden by Store.hidden.collectAsState()
+    val showAdult by Store.showAdult.collectAsState()
     val play: (Entry, Boolean) -> Unit = { e, resume ->
         // Startas ett avsnitt utanför seriens sida (t.ex. från Fortsätt titta) öppnas serien
         // bakom spelaren, så att Tillbaka leder dit i stället för till startsidan.
@@ -223,7 +225,7 @@ private fun App(prefs: Prefs) {
                     }
                     is LoadState.Failed -> Message("Kunde inte ladda spellistan:\n${s.message}")
                     is LoadState.Ready -> key(section) {
-                        val lib = remember(s.library, hidden) { s.library.filtered(hidden) }
+                        val lib = remember(s.library, hidden, showAdult) { s.library.filtered(hidden, showAdult) }
                         when (section) {
                             Section.HOME -> HomeScreen(lib, play, open) { section = it }
                             Section.SEARCH -> SearchScreen(lib, onOpen = open)
@@ -356,6 +358,7 @@ private fun Sidebar(
 
 // ---------------------------------------------------------------- Filmer / Serier
 
+/** Filmer eller serier: en vågrät rad per kategori (som på Netflix), "Visa alla" öppnar hela kategorin. */
 @Composable
 private fun Browser(lib: Library, seriesMode: Boolean, onOpen: (Detail) -> Unit) {
     val groups = if (seriesMode) lib.seriesGroups else lib.movieGroups
@@ -364,55 +367,93 @@ private fun Browser(lib: Library, seriesMode: Boolean, onOpen: (Detail) -> Unit)
         return
     }
     val favMovies by Store.favMovies.collectAsState()
-    var selected by rememberSaveable(seriesMode) { mutableStateOf(groups.first()) }
+    val favSeries by Store.favSeries.collectAsState()
+    var openGroup by rememberSaveable(seriesMode) { mutableStateOf<String?>(null) }
     var search by remember { mutableStateOf("") }
     val term = search.trim()
+    BackHandler(enabled = openGroup != null || term.isNotEmpty()) {
+        if (term.isNotEmpty()) search = "" else openGroup = null
+    }
+    val movieCard: @Composable (Entry, Modifier) -> Unit = { e, m ->
+        PosterCard(e.title, e.logo, null, m, favorite = favMovies.any { it.url == e.url }) { onOpen(Detail.Movie(e)) }
+    }
+    val seriesCard: @Composable (Series, Modifier) -> Unit = { s, m ->
+        PosterCard(
+            s.name, s.logo, if (s.xtreamId == null) "${s.episodes.size} avsnitt" else null, m,
+            favorite = favSeries.any { (it.xtreamId ?: it.name) == (s.xtreamId ?: s.name) },
+        ) { onOpen(Detail.Show(s)) }
+    }
 
-    Row(Modifier.fillMaxSize().padding(top = 24.dp, start = 20.dp)) {
-        Column(Modifier.width(270.dp).fillMaxHeight()) {
+    Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 26.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 32.dp)) {
+            Text(
+                openGroup ?: if (seriesMode) "Serier" else "Filmer",
+                color = Color.White,
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(20.dp))
             GlimtTextField(
                 value = search,
                 onValueChange = { search = it },
                 placeholder = if (seriesMode) "Sök serie…" else "Sök film…",
                 leading = Icons.Rounded.Search,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.width(380.dp),
             )
-            Spacer(Modifier.height(12.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                items(groups) { g ->
-                    val active = g == selected && term.length < 2
-                    FocusBox(onClick = { selected = g; search = "" }, modifier = Modifier.fillMaxWidth(), scale = 1.03f) { focused ->
-                        Text(
-                            g,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(if (active) CardBg else if (focused) CardBg.copy(alpha = 0.6f) else Color.Transparent)
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            color = if (focused || active) Color.White else Muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+        }
+        Spacer(Modifier.height(8.dp))
+        val open = openGroup
+        when {
+            term.length >= 2 -> {
+                if (seriesMode) {
+                    val list = remember(term) { lib.allSeries.filter { it.name.contains(term, ignoreCase = true) }.take(500) }
+                    Grid(list, emptyText = "Inga träffar.") { seriesCard(it, Modifier) }
+                } else {
+                    val list = remember(term) { lib.allMovies.filter { it.title.contains(term, ignoreCase = true) }.take(500) }
+                    Grid(list, emptyText = "Inga träffar.") { movieCard(it, Modifier) }
+                }
+            }
+            open != null -> {
+                if (seriesMode) Grid(lib.series[open].orEmpty(), emptyText = "Inga serier här.") { seriesCard(it, Modifier) }
+                else Grid(lib.movies[open].orEmpty(), emptyText = "Inga filmer här.") { movieCard(it, Modifier) }
+            }
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 48.dp)) {
+                items(groups, key = { it }) { g ->
+                    val count = if (seriesMode) lib.series[g]?.size ?: 0 else lib.movies[g]?.size ?: 0
+                    Column {
+                        SectionTitle(g, "$count titlar")
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                            contentPadding = PaddingValues(start = 4.dp, end = 32.dp, top = 6.dp, bottom = 8.dp),
+                        ) {
+                            if (seriesMode) {
+                                items(lib.series[g].orEmpty().take(30)) { seriesCard(it, Modifier.width(140.dp)) }
+                            } else {
+                                items(lib.movies[g].orEmpty().take(30)) { movieCard(it, Modifier.width(140.dp)) }
+                            }
+                            item { ShowAllCard(count) { openGroup = g } }
+                        }
                     }
                 }
             }
         }
-        Spacer(Modifier.width(20.dp))
-        if (seriesMode) {
-            val list = remember(selected, term) {
-                if (term.length >= 2) lib.allSeries.filter { it.name.contains(term, ignoreCase = true) }.take(500)
-                else lib.series[selected].orEmpty()
-            }
-            Grid(list, emptyText = "Inga serier här.") { s ->
-                PosterCard(s.name, s.logo, if (s.xtreamId == null) "${s.episodes.size} avsnitt" else null) { onOpen(Detail.Show(s)) }
-            }
-        } else {
-            val list = remember(selected, term) {
-                if (term.length >= 2) lib.allMovies.filter { it.title.contains(term, ignoreCase = true) }.take(500)
-                else lib.movies[selected].orEmpty()
-            }
-            Grid(list, emptyText = "Inga filmer här.") { e ->
-                PosterCard(e.title, e.logo, null, favorite = favMovies.any { it.url == e.url }) { onOpen(Detail.Movie(e)) }
-            }
+    }
+}
+
+@Composable
+private fun ShowAllCard(count: Int, onClick: () -> Unit) {
+    FocusBox(onClick = onClick, modifier = Modifier.width(140.dp).height(210.dp)) { focused ->
+        Column(
+            Modifier.fillMaxSize().background(if (focused) Color.White else Surface1),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = if (focused) OnAccent else Accent, modifier = Modifier.size(40.dp))
+            Text("Visa alla", color = if (focused) OnAccent else Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("$count st", color = if (focused) OnAccent.copy(alpha = 0.7f) else Muted, fontSize = 13.sp)
         }
     }
 }
@@ -684,6 +725,9 @@ private fun SettingsScreen(
         }
 
         SettingsCard("Innehåll") {
+            val adultOn by Store.showAdult.collectAsState()
+            SwitchRow("Visa vuxeninnehåll (18+)", adultOn) { Store.setShowAdult(!adultOn) }
+            Spacer(Modifier.height(10.dp))
             NavRow(
                 Icons.Rounded.VisibilityOff,
                 "Dölj språk och kategorier",

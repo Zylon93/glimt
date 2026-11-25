@@ -48,11 +48,13 @@ object Xtream {
 
         // Filmer, i leverantörens kategoriordning
         val vodCats = categories(vodCatFile)
+        val adult = HashSet<String>()
         val movies = LinkedHashMap<String, MutableList<Entry>>()
         vodCats.values.forEach { movies[it] = ArrayList() }
         readObjects(vodFile) { o ->
             val id = o["stream_id"] ?: return@readObjects
             val group = vodCats[o["category_id"]] ?: "Övrigt"
+            if (o["is_adult"] == "1" || o["is_adult"] == "true") adult += group
             val title = o["name"].orEmpty().ifBlank { "Okänd titel" }
             val logo = o["stream_icon"]?.takeIf { it.startsWith("http") }
             movies.getOrPut(group) { ArrayList() }
@@ -79,7 +81,7 @@ object Xtream {
         }
         series.entries.removeAll { it.value.isEmpty() }
 
-        return Library(movies.keys.toList(), movies, series.keys.toList(), series)
+        return Library(movies.keys.toList(), movies, series.keys.toList(), series, adult)
     }
 
     private val seriesCache = HashMap<String, Pair<Details?, List<Entry>>>()

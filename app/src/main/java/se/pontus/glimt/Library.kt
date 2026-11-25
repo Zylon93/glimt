@@ -41,6 +41,8 @@ class Library(
     val movies: Map<String, List<Entry>>,
     val seriesGroups: List<String>,
     val series: Map<String, List<Series>>,
+    /** Kategorier med vuxeninnehåll (enligt namn eller leverantörens is_adult-flagga). */
+    val adultGroups: Set<String> = emptySet(),
 ) {
     val allMovies: List<Entry> by lazy { movies.values.flatten() }
     val allSeries: List<Series> by lazy { series.values.flatten() }
@@ -86,12 +88,18 @@ private val prefixNames = mapOf(
 fun prefixLabel(prefix: String): String = prefixNames[prefix]?.let { "$it ($prefix)" } ?: prefix
 
 /** Biblioteket utan dolda kategorier. Nycklar: "p:SE" = hela språkgruppen, "c:<namn>" = en kategori. */
-fun Library.filtered(hidden: Set<String>): Library {
-    if (hidden.isEmpty()) return this
-    fun visible(g: String) = "c:$g" !in hidden && "p:${categoryPrefix(g)}" !in hidden
+private val adultRe by lazy { Regex("""(?i)(xxx|adult|porn|erotic|erotik|vuxen|18\+|\+18)""") }
+
+/** Ser kategorinamnet ut som vuxeninnehåll? */
+fun looksAdult(categoryName: String): Boolean = adultRe.containsMatchIn(categoryName)
+
+fun Library.filtered(hidden: Set<String>, showAdult: Boolean = false): Library {
+    if (hidden.isEmpty() && showAdult) return this
+    fun visible(g: String) = "c:$g" !in hidden && "p:${categoryPrefix(g)}" !in hidden &&
+        (showAdult || (g !in adultGroups && !looksAdult(g)))
     val mg = movieGroups.filter { visible(it) }
     val sg = seriesGroups.filter { visible(it) }
-    return Library(mg, mg.associateWith { movies[it].orEmpty() }, sg, sg.associateWith { series[it].orEmpty() })
+    return Library(mg, mg.associateWith { movies[it].orEmpty() }, sg, sg.associateWith { series[it].orEmpty() }, adultGroups)
 }
 
 object M3u {

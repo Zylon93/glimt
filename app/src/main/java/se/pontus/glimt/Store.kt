@@ -51,10 +51,27 @@ object Store {
         prefs.edit().putBoolean("show_adult", v).apply()
     }
 
+    private val _genreMode = MutableStateFlow(true)
+    /** Filmer/Serier sorterade efter genre (på) eller leverantörens kategorier (av). */
+    val genreMode: StateFlow<Boolean> = _genreMode
+    fun setGenreMode(v: Boolean) {
+        _genreMode.value = v
+        prefs.edit().putBoolean("genre_mode", v).apply()
+    }
+
+    private val _tmdbKey = MutableStateFlow("")
+    val tmdbKey: StateFlow<String> = _tmdbKey
+    fun setTmdbKey(v: String) {
+        _tmdbKey.value = v.trim()
+        prefs.edit().putString("tmdb_key", v.trim()).apply()
+    }
+
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = context.getSharedPreferences("glimt_store", Context.MODE_PRIVATE)
         _showAdult.value = prefs.getBoolean("show_adult", false)
+        _genreMode.value = prefs.getBoolean("genre_mode", true)
+        _tmdbKey.value = prefs.getString("tmdb_key", "").orEmpty()
         _hidden.value = prefs.getStringSet("hidden", emptySet())?.toSet() ?: emptySet()
         _favMovies.value = readArray("fav_movies") { entryFromJson(it) }
         _favSeries.value = readArray("fav_series") { seriesFromJson(it) }

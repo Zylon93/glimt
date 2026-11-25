@@ -116,6 +116,21 @@ private fun App(prefs: Prefs) {
     var showCategories by remember { mutableStateOf(false) }
     val hidden by Store.hidden.collectAsState()
     val showAdult by Store.showAdult.collectAsState()
+    val genreMode by Store.genreMode.collectAsState()
+    val tmdbKey by Store.tmdbKey.collectAsState()
+    val tmdbVersion by Tmdb.version.collectAsState()
+
+    // Biblioteket utan dolda kategorier, och samma bibliotek grupperat efter genre
+    val readyLib = (state as? LoadState.Ready)?.library
+    val filteredLib = remember(readyLib, hidden, showAdult) { readyLib?.filtered(hidden, showAdult) }
+    LaunchedEffect(filteredLib, tmdbKey, genreMode) {
+        kotlinx.coroutines.delay(1500) // vänta tills man skrivit klart nyckeln
+        if (filteredLib != null && genreMode) Tmdb.start(appContext, filteredLib, tmdbKey)
+    }
+    val genreLib by androidx.compose.runtime.produceState<Library?>(null, filteredLib, tmdbVersion, genreMode) {
+        val l = filteredLib
+        value = if (l != null && genreMode) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Genres.build(l) } else null
+    }
     val play: (Entry, Boolean) -> Unit = { e, resume ->
         // Startas ett avsnitt utanför seriens sida (t.ex. från Fortsätt titta) öppnas serien
         // bakom spelaren, så att Tillbaka leder dit i stället för till startsidan.
@@ -225,12 +240,13 @@ private fun App(prefs: Prefs) {
                     }
                     is LoadState.Failed -> Message("Kunde inte ladda spellistan:\n${s.message}")
                     is LoadState.Ready -> key(section) {
-                        val lib = remember(s.library, hidden, showAdult) { s.library.filtered(hidden, showAdult) }
+                        val lib = filteredLib ?: s.library
+                        val browseLib = genreLib ?: lib
                         when (section) {
                             Section.HOME -> HomeScreen(lib, play, open) { section = it }
                             Section.SEARCH -> SearchScreen(lib, onOpen = open)
-                            Section.MOVIES -> Browser(lib, seriesMode = false, onOpen = open)
-                            Section.SERIES -> Browser(lib, seriesMode = true, onOpen = open)
+                            Section.MOVIES -> Browser(browseLib, seriesMode = false, isGenre = genreLib != null, onOpen = open)
+                            Section.SERIES -> Browser(browseLib, seriesMode = true, isGenre = genreLib != null, onOpen = open)
                             Section.FAVORITES -> FavoritesScreen(open)
                             Section.HISTORY -> HistoryScreen(play)
                             Section.SETTINGS -> Unit
@@ -360,7 +376,7 @@ private fun Sidebar(
 
 /** Filmer eller serier: en vågrät rad per kategori (som på Netflix), "Visa alla" öppnar hela kategorin. */
 @Composable
-private fun Browser(lib: Library, seriesMode: Boolean, onOpen: (Detail) -> Unit) {
+private fun Browser(lib: Library, seriesMode: Boolean, isGenre: Boolean, onOpen: (Detail) -> Unit) {
     val groups = if (seriesMode) lib.seriesGroups else lib.movieGroups
     if (groups.isEmpty()) {
         Message(if (seriesMode) "Inga serier hittades i spellistan." else "Inga filmer hittades i spellistan.")
@@ -403,6 +419,18 @@ private fun Browser(lib: Library, seriesMode: Boolean, onOpen: (Detail) -> Unit)
                 leading = Icons.Rounded.Search,
                 modifier = Modifier.width(380.dp),
             )
+        }
+        if (isGenre) {
+            val progress by Tmdb.progress.collectAsState()
+            val key by Store.tmdbKey.collectAsState()
+            val p = progress
+            val info = when {
+                p?.error != null -> p.error + " – kontrollera den under Inställningar."
+                p != null -> "Sorterar efter genre i bakgrunden… ${p.done} / ${p.total} (${if (p.total > 0) p.done * 100 / p.total else 0} %)"
+                key.isBlank() && Genres.OTHER in groups -> "Titlar utan genre i kategorinamnet hamnar i Övrigt. Lägg in en gratis TMDB-nyckel under Inställningar så sorteras de också."
+                else -> null
+            }
+            if (info != null) Text(info, color = if (p?.error != null) Bad else Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, end = 32.dp))
         }
         Spacer(Modifier.height(8.dp))
         val open = openGroup
@@ -602,7 +630,7 @@ private fun CategoryScreen(lib: Library?) {
             .map { (p, list) -> p to list.sumOf { it.second } }
             .sortedByDescending { it.second }
     }
-    val keep = setOf("SE", "SV", "SWE", "EN", "ENG", "UK", "US", "Övrigt")
+    val keep = setOf("SE", "SV", "SWE", "EN", "ENG", "UK", "US", "NORDIC", "Övrigt")
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 40.dp), contentPadding = PaddingValues(vertical = 24.dp)) {
         item {
@@ -726,8 +754,23 @@ private fun SettingsScreen(
 
         SettingsCard("Innehåll") {
             val adultOn by Store.showAdult.collectAsState()
+            val genresOn by Store.genreMode.collectAsState()
+            SwitchRow("Sortera Filmer och Serier efter genre (Skräck, Komedi …)", genresOn) { Store.setGenreMode(!genresOn) }
             SwitchRow("Visa vuxeninnehåll (18+)", adultOn) { Store.setShowAdult(!adultOn) }
             Spacer(Modifier.height(10.dp))
+            var tmdb by remember { mutableStateOf(Store.tmdbKey.value) }
+            GlimtTextField(
+                tmdb,
+                { tmdb = it; Store.setTmdbKey(it) },
+                label = "TMDB API-nyckel (för genrer)",
+                placeholder = "Gratis: themoviedb.org → Inställningar → API",
+            )
+            Text(
+                "Utan nyckel används genreord i leverantörens kategorinamn. Med nyckel sorteras resten i bakgrunden första gången (några minuter), sedan sparas allt.",
+                color = Muted,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
+            )
             NavRow(
                 Icons.Rounded.VisibilityOff,
                 "Dölj språk och kategorier",

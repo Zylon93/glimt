@@ -62,6 +62,7 @@ object Xtream {
                     Entry(
                         title, group, logo, acc.movieUrl(id, o["container_extension"].orEmpty()), Kind.MOVIE,
                         xtreamId = id, added = o["added"]?.toLongOrNull() ?: 0L,
+                        tmdb = (o["tmdb"] ?: o["tmdb_id"])?.takeIf { (it.toIntOrNull() ?: 0) > 0 },
                     )
                 )
         }
@@ -77,7 +78,8 @@ object Xtream {
             val name = o["name"].orEmpty().ifBlank { "Okänd serie" }
             val logo = o["cover"]?.takeIf { it.startsWith("http") }
             val added = (o["last_modified"] ?: o["added"])?.toLongOrNull() ?: 0L
-            series.getOrPut(group) { ArrayList() }.add(Series(name, group, logo, emptyList(), xtreamId = id, added = added))
+            val tmdb = (o["tmdb"] ?: o["tmdb_id"])?.takeIf { (it.toIntOrNull() ?: 0) > 0 }
+            series.getOrPut(group) { ArrayList() }.add(Series(name, group, logo, emptyList(), xtreamId = id, added = added, tmdb = tmdb))
         }
         series.entries.removeAll { it.value.isEmpty() }
 

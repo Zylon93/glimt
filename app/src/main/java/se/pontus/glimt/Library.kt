@@ -23,6 +23,8 @@ data class Entry(
     val xtreamId: String? = null,
     /** När titeln lades till hos leverantören (unix-sekunder), 0 om okänt. */
     val added: Long = 0,
+    /** TMDB-id om leverantören uppger det (används för genrer). */
+    val tmdb: String? = null,
 )
 
 data class Series(
@@ -34,6 +36,8 @@ data class Series(
     val xtreamId: String? = null,
     /** Senast uppdaterad hos leverantören (unix-sekunder), 0 om okänt. */
     val added: Long = 0,
+    /** TMDB-id om leverantören uppger det (används för genrer). */
+    val tmdb: String? = null,
 )
 
 class Library(
@@ -68,21 +72,94 @@ class Library(
 
 private val categoryPrefixRe by lazy { Regex("""^\s*[\|\[\(]?\s*([A-Za-z]{2,4})\s*[\|\]\)\-:]""") }
 
-/** "SE | Filmer" -> "SE", "|AR| Drama" -> "AR". Kategorier utan språkprefix hamnar i "Övrigt". */
-fun categoryPrefix(name: String): String =
-    categoryPrefixRe.find(name)?.groupValues?.get(1)?.uppercase() ?: "Övrigt"
+/** Språkord i kategorinamn utan kod, t.ex. "ARABIC MOVIES" eller "BOLLYWOOD". Första träffen vinner. */
+private val languageWords: List<Pair<String, Regex>> by lazy {
+    listOf(
+        "EXYU" to "ex-?yu|balkan|serbia|croat|bosn|hrvat|srpsk",
+        "NORDIC" to "nordic|nordisk|scandinav|skandinav",
+        "SE" to "swed|svensk|sverige",
+        "NO" to "norw|norsk|norge",
+        "DK" to "danish|dansk|danmark|denmark",
+        "FI" to "finnish|suomi|finland",
+        "AR" to "arab|egypt|gulf|khaleej|ramadan|islam|maghreb|morocc|tunis|alger|leban|syria|iraq|عرب",
+        "TR" to "turk|türk",
+        "KU" to "kurd",
+        "IR" to "persian|iran|farsi",
+        "AF" to "afghan|pashto",
+        "PK" to "pakistan|urdu",
+        "IN" to "india|hindi|bollywood|tamil|telugu|malayalam|punjabi|bengali|marathi|kannada|desi",
+        "AL" to "alban|shqip",
+        "GR" to "greek|greece|ελλην",
+        "RU" to "russia|русск",
+        "UA" to "ukrain",
+        "PL" to "polish|polsk|polska",
+        "RO" to "romania|român",
+        "BG" to "bulgar",
+        "HU" to "hungar|magyar",
+        "CZ" to "czech|cesk",
+        "DE" to "german|deutsch",
+        "NL" to "dutch|nederland|vlaams",
+        "FR" to "french|français|francais",
+        "IT" to "italian|italia",
+        "ES" to "spanish|españ|espan|castellano",
+        "LAT" to "latino|latin america",
+        "BR" to "brazil|brasil",
+        "PT" to "portug",
+        "CN" to "china|chinese|mandarin|cantonese",
+        "JP" to "japan",
+        "KR" to "korea",
+        "PH" to "filipino|philippin|pinoy|tagalog",
+        "ASIA" to "asia",
+        "AFRICA" to "africa|nollywood",
+        "SO" to "somal",
+        "IL" to "israel|hebrew",
+        "EN" to "english|\\busa\\b|\\buk\\b|british|america",
+    ).map { (code, words) -> code to Regex("(?i)($words)") }
+}
+
+private val prefixCache = HashMap<String, String>()
+
+/**
+ * Språkgrupp för en kategori: "SE | Filmer" -> "SE", "|AR| Drama" -> "AR",
+ * "ARABIC MOVIES" -> "AR", "EX-YU | Filmovi" -> "EXYU". Okänt hamnar i "Övrigt".
+ */
+fun categoryPrefix(name: String): String = synchronized(prefixCache) {
+    prefixCache.getOrPut(name) {
+        val code = categoryPrefixRe.find(name)?.groupValues?.get(1)?.uppercase()
+        when {
+            code == "EX" || code == "EXYU" -> "EXYU"
+            code != null && code != "TOP" && code != "NEW" && code != "VOD" && code != "ALL" -> code
+            else -> languageWords.firstOrNull { it.second.containsMatchIn(name) }?.first ?: "Övrigt"
+        }
+    }
+}
+
+/** Språkkod i början av en titel: "AR - Film" -> "AR", "|TR| Film" -> "TR". Snabb, utan regex. */
+fun titlePrefix(title: String): String? {
+    var i = 0
+    while (i < title.length && (title[i] == ' ' || title[i] == '|' || title[i] == '[' || title[i] == '(')) i++
+    val start = i
+    while (i < title.length && title[i].isLetter() && title[i].code < 128) i++
+    val len = i - start
+    if (len !in 2..4) return null
+    while (i < title.length && title[i] == ' ') i++
+    if (i >= title.length || title[i] !in "-|:])") return null
+    return title.substring(start, start + len).uppercase()
+}
 
 private val prefixNames = mapOf(
     "SE" to "Svenska", "SV" to "Svenska", "SWE" to "Svenska", "NO" to "Norska", "NOR" to "Norska",
     "DK" to "Danska", "DA" to "Danska", "FI" to "Finska", "FIN" to "Finska", "IS" to "Isländska",
-    "EN" to "Engelska", "ENG" to "Engelska", "UK" to "Engelska (UK)", "US" to "Engelska (US)",
+    "NORDIC" to "Nordiskt", "EN" to "Engelska", "ENG" to "Engelska", "UK" to "Engelska (UK)", "US" to "Engelska (US)",
     "AR" to "Arabiska", "TR" to "Turkiska", "DE" to "Tyska", "GER" to "Tyska", "FR" to "Franska",
     "ES" to "Spanska", "IT" to "Italienska", "NL" to "Holländska", "PL" to "Polska", "GR" to "Grekiska",
     "PT" to "Portugisiska", "BR" to "Portugisiska (BR)", "RU" to "Ryska", "IN" to "Indiska", "HI" to "Hindi",
     "KR" to "Koreanska", "JP" to "Japanska", "CN" to "Kinesiska", "AL" to "Albanska", "KU" to "Kurdiska",
     "FA" to "Persiska", "IR" to "Persiska", "SO" to "Somaliska", "EXYU" to "Ex-Jugoslavien", "YU" to "Ex-Jugoslavien",
     "RO" to "Rumänska", "HU" to "Ungerska", "CZ" to "Tjeckiska", "BG" to "Bulgariska", "UA" to "Ukrainska",
-    "PK" to "Pakistan", "AF" to "Afghanistan", "LAT" to "Latinamerika", "MULTI" to "Flerspråkigt",
+    "PK" to "Pakistan", "AF" to "Afghanistan", "LAT" to "Latinamerika", "LA" to "Latinamerika", "MULTI" to "Flerspråkigt",
+    "PH" to "Filippinska", "QC" to "Québec", "BN" to "Bengali", "MT" to "Maltesiska", "BE" to "Belgien",
+    "IL" to "Hebreiska", "ASIA" to "Asiatiskt", "AFRICA" to "Afrikanskt",
 )
 
 fun prefixLabel(prefix: String): String = prefixNames[prefix]?.let { "$it ($prefix)" } ?: prefix
@@ -97,9 +174,16 @@ fun Library.filtered(hidden: Set<String>, showAdult: Boolean = false): Library {
     if (hidden.isEmpty() && showAdult) return this
     fun visible(g: String) = "c:$g" !in hidden && "p:${categoryPrefix(g)}" !in hidden &&
         (showAdult || (g !in adultGroups && !looksAdult(g)))
+    // Titlar med dold språkkod i namnet ("AR - Film") tas bort även i blandade kategorier
+    val hiddenCodes = hidden.filter { it.startsWith("p:") }.map { it.substring(2) }.toSet()
+    fun keepTitle(t: String) = hiddenCodes.isEmpty() || titlePrefix(t)?.let { it !in hiddenCodes } ?: true
     val mg = movieGroups.filter { visible(it) }
     val sg = seriesGroups.filter { visible(it) }
-    return Library(mg, mg.associateWith { movies[it].orEmpty() }, sg, sg.associateWith { series[it].orEmpty() }, adultGroups)
+    val mm = LinkedHashMap<String, List<Entry>>()
+    for (g in mg) movies[g].orEmpty().filter { keepTitle(it.title) }.takeIf { it.isNotEmpty() }?.let { mm[g] = it }
+    val sm = LinkedHashMap<String, List<Series>>()
+    for (g in sg) series[g].orEmpty().filter { keepTitle(it.name) }.takeIf { it.isNotEmpty() }?.let { sm[g] = it }
+    return Library(mm.keys.toList(), mm, sm.keys.toList(), sm, adultGroups)
 }
 
 object M3u {

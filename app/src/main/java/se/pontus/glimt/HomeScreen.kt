@@ -20,16 +20,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.Icon
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -75,25 +69,6 @@ internal fun HomeScreen(
     ) {
         if (featured.isNotEmpty()) {
             item { Hero(featured, onPlay, onOpen) }
-        }
-        item {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Tile("Filmer", "${num(lib.allMovies.size)} filmer", Icons.Rounded.Movie, Color(0xFF3A5BD9), Color(0xFF6E8BFF), Modifier.weight(1f)) {
-                    onSection(Section.MOVIES)
-                }
-                Tile("Serier", "${num(lib.allSeries.size)} serier", Icons.Rounded.Tv, Color(0xFF6A3FD0), Color(0xFFA47BFF), Modifier.weight(1f)) {
-                    onSection(Section.SERIES)
-                }
-                Tile("Favoriter", "${favMovies.size + favSeries.size} st", Icons.Rounded.Favorite, Color(0xFFD0304A), Color(0xFFFF6F7F), Modifier.weight(1f)) {
-                    onSection(Section.FAVORITES)
-                }
-                Tile("Historik", "${history.size} påbörjade", Icons.Rounded.History, Color(0xFF0E8C78), Color(0xFF2ED3B0), Modifier.weight(1f)) {
-                    onSection(Section.HISTORY)
-                }
-            }
         }
         if (history.isNotEmpty()) {
             item {
@@ -172,8 +147,10 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
         if (acc != null && id != null) value = runCatching { Xtream.vodInfo(acc, id) }.getOrNull()
     }
     val context = LocalContext.current
+    val prefs = remember { Prefs(context) }
+    val subs = rememberSubState(e, prefs)
 
-    Box(Modifier.fillMaxWidth().height(400.dp)) {
+    Box(Modifier.fillMaxWidth().height(440.dp)) {
         AsyncImage(
             model = ImageRequest.Builder(context).data(details?.backdrop ?: e.logo).crossfade(true).build(),
             contentDescription = null,
@@ -199,6 +176,14 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
                 .onFocusChanged { focusedInside = it.hasFocus },
         ) {
             Text(
+                "NYTT I BIBLIOTEKET",
+                color = Muted,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.7.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
                 displayTitle(e.title),
                 color = Color.White,
                 fontSize = 48.sp,
@@ -209,10 +194,14 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
             )
             Spacer(Modifier.height(8.dp))
             MetaLine(details)
+            if (subs != null) {
+                Spacer(Modifier.height(12.dp))
+                SubtitleBadge(subs, prefs.subLang)
+            }
             val plot = details?.plot.orEmpty()
             if (plot.isNotBlank()) {
-                Spacer(Modifier.height(10.dp))
-                Text(plot, color = TextBright, fontSize = 15.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 21.sp)
+                Spacer(Modifier.height(12.dp))
+                Text(plot, color = TextBright, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 23.sp)
             }
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -229,7 +218,7 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
                     Modifier
                         .size(width = if (i == index % featured.size) 22.dp else 7.dp, height = 7.dp)
                         .background(
-                            if (i == index % featured.size) Color.White else Color.White.copy(alpha = 0.4f),
+                            if (i == index % featured.size) Accent else Color.White.copy(alpha = 0.3f),
                             CircleShape,
                         )
                 )
@@ -257,38 +246,3 @@ internal fun MetaLine(d: Details?) {
         }
     }
 }
-
-@Composable
-private fun Tile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    from: Color,
-    to: Color,
-    modifier: Modifier,
-    onClick: () -> Unit,
-) {
-    FocusBox(onClick = onClick, modifier = modifier.height(92.dp), shape = RoundedCornerShape(20.dp), scale = 1.05f) {
-        Row(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.horizontalGradient(listOf(from, to)))
-                .padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(46.dp).background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center,
-            ) { Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp)) }
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(subtitle, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, maxLines = 1)
-            }
-            Spacer(Modifier.weight(1f))
-            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.9f))
-        }
-    }
-}
-
-private fun num(n: Int): String = String.format(java.util.Locale("sv", "SE"), "%,d", n)

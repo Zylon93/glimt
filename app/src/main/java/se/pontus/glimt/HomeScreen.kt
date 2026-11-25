@@ -150,7 +150,7 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
     val prefs = remember { Prefs(context) }
     val subs = rememberSubState(e, prefs)
 
-    Box(Modifier.fillMaxWidth().height(500.dp)) {
+    Box(Modifier.fillMaxWidth().height(540.dp)) {
         AsyncImage(
             model = ImageRequest.Builder(context).data(details?.backdrop ?: e.logo).crossfade(true).build(),
             contentDescription = null,
@@ -170,8 +170,9 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
         )
         Column(
             Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 40.dp, top = 84.dp)
+                // Börjar alltid under toppmenyn (92 dp) så att titeln aldrig hamnar bakom flikarna
+                .align(Alignment.TopStart)
+                .padding(start = 40.dp, top = 120.dp)
                 .widthIn(max = 620.dp)
                 .onFocusChanged { focusedInside = it.hasFocus },
         ) {

@@ -197,6 +197,7 @@ internal fun ContinueCard(p: Progress, modifier: Modifier = Modifier, onClick: (
         val title = if (e.kind == Kind.EPISODE && e.series != null) displayTitle(e.series) else displayTitle(e.title)
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = TextBright)
         val sub = buildString {
+            if (p.upNext) append("Nästa avsnitt · ")
             if (e.kind == Kind.EPISODE && e.season > 0) append("S%02d E%02d · ".format(e.season, e.episode))
             if (p.minutesLeft > 0) append("${p.minutesLeft} min kvar")
         }

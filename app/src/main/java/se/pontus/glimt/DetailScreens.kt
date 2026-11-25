@@ -178,7 +178,8 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (last != null) {
                     PillButton(
-                        "▶  Fortsätt S%02d E%02d".format(last.entry.season, last.entry.episode),
+                        (if (last.upNext) "▶  Spela nästa: S%02d E%02d" else "▶  Fortsätt S%02d E%02d")
+                            .format(last.entry.season, last.entry.episode),
                         primary = true,
                         modifier = Modifier.focusRequester(firstFocus),
                     ) { onPlay(last.entry, true) }
@@ -239,9 +240,10 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
                                             modifier = Modifier.width(110.dp),
                                         )
                                         Text(e.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                        if (p != null) Text("${p.minutesLeft} min kvar", color = Muted, fontSize = 13.sp)
+                                        if (p != null && p.upNext) Text("Nästa", color = Accent, fontSize = 13.sp)
+                                        if (p != null && !p.upNext) Text("${p.minutesLeft} min kvar", color = Muted, fontSize = 13.sp)
                                     }
-                                    if (p != null) {
+                                    if (p != null && !p.upNext) {
                                         Spacer(Modifier.height(8.dp))
                                         ProgressBar(p, Modifier.fillMaxWidth())
                                     }

@@ -280,15 +280,28 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun onEnded() {
-        Store.saveProgress(entry, duration, duration)
         val next = nextEpisode()
-        if (next != null) loadEntry(next, resume = false) else finish()
+        if (next != null) {
+            loadEntry(next, resume = false) // sparar det här avsnittet som färdigsett
+        } else {
+            saveProgress()
+            finish()
+        }
     }
 
+    /**
+     * Färdigsett = slutet nått, mindre än 7 % kvar, eller inne i eftertexterna enligt TheIntroDB.
+     * Då hamnar nästa avsnitt under "Fortsätt titta".
+     */
     private fun saveProgress() {
         val d = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
         val ended = player.playbackState == Player.STATE_ENDED
-        Store.saveProgress(entry, if (ended) d else player.currentPosition, d)
+        val pos = if (ended) d else player.currentPosition
+        val creditsStart = segments.firstOrNull { it.type == IntroDb.Type.CREDITS }?.start
+        val finished = ended ||
+            (d > 0 && pos > d * 0.93) ||
+            (creditsStart != null && creditsStart > 60_000 && pos >= creditsStart)
+        Store.saveProgress(entry, pos, d, finished, if (entry.kind == Kind.EPISODE) nextEpisode() else null)
     }
 
     private fun togglePlay() {
@@ -311,9 +324,13 @@ class PlayerActivity : ComponentActivity() {
 
     private fun skip(s: IntroDb.Segment) {
         if (s.type == IntroDb.Type.CREDITS) {
-            Store.saveProgress(entry, duration, duration)
             val next = nextEpisode()
-            if (next != null) loadEntry(next, resume = false) else finish()
+            if (next != null) {
+                loadEntry(next, resume = false)
+            } else {
+                saveProgress()
+                finish()
+            }
         } else {
             player.seekTo(s.end ?: duration)
         }

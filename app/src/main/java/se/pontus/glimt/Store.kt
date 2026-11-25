@@ -11,6 +11,8 @@ import org.json.JSONObject
 data class Progress(val entry: Entry, val position: Long, val duration: Long, val updated: Long) {
     val fraction: Float get() = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
     val minutesLeft: Long get() = if (duration > 0) ((duration - position) / 60_000).coerceAtLeast(1) else 0
+    /** Nästa avsnitt i en serie man just sett klart (inte påbörjat än). */
+    val upNext: Boolean get() = duration == 0L && position == 0L
 }
 
 /** Favoriter och "Fortsätt titta", sparat lokalt på TV:n. */
@@ -78,14 +80,29 @@ object Store {
     fun lastEpisodeOf(seriesName: String): Progress? =
         _history.value.firstOrNull { it.entry.kind == Kind.EPISODE && it.entry.series == seriesName }
 
-    fun saveProgress(e: Entry, position: Long, duration: Long) {
-        val rest = _history.value.filterNot { it.entry.url == e.url }
-        val finished = duration > 0 && position > duration * 0.93
-        _history.value = if (finished || position < 10_000) {
-            // Färdigsedd (eller knappt påbörjad) – visas inte under "Fortsätt titta"
-            if (finished) rest else _history.value
-        } else {
-            (listOf(Progress(e, position, duration, System.currentTimeMillis())) + rest).take(MAX_HISTORY)
+    /**
+     * Sparar hur långt man kommit. Är titeln färdigsedd och det finns ett [next] avsnitt
+     * läggs det in under "Fortsätt titta" i stället, så att serien ligger kvar där.
+     * Varje serie visas bara en gång (senaste avsnittet).
+     */
+    fun saveProgress(
+        e: Entry,
+        position: Long,
+        duration: Long,
+        finished: Boolean = duration > 0 && position > duration * 0.93,
+        next: Entry? = null,
+    ) {
+        // Bara öppnad några sekunder: ändra ingenting
+        if (!finished && position < 10_000) return
+        var rest = _history.value.filterNot { it.entry.url == e.url }
+        if (e.kind == Kind.EPISODE && e.series != null) {
+            rest = rest.filterNot { it.entry.kind == Kind.EPISODE && it.entry.series == e.series && it.entry.xtreamId == e.xtreamId }
+        }
+        val now = System.currentTimeMillis()
+        _history.value = when {
+            finished && next != null -> (listOf(Progress(next, 0, 0, now)) + rest).take(MAX_HISTORY)
+            finished -> rest
+            else -> (listOf(Progress(e, position, duration, now)) + rest).take(MAX_HISTORY)
         }
         writeHistory()
     }

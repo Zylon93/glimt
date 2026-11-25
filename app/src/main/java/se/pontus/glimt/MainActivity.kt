@@ -92,7 +92,15 @@ private fun App(prefs: Prefs) {
     var detail by remember { mutableStateOf<Detail?>(null) }
     var showCategories by remember { mutableStateOf(false) }
     val hidden by Store.hidden.collectAsState()
-    val play: (Entry, Boolean) -> Unit = { e, resume -> activity.startActivity(PlayerActivity.intent(activity, e, resume)) }
+    val play: (Entry, Boolean) -> Unit = { e, resume ->
+        // Startas ett avsnitt utanför seriens sida (t.ex. från Fortsätt titta) öppnas serien
+        // bakom spelaren, så att Tillbaka leder dit i stället för till startsidan.
+        val series = e.series
+        if (e.kind == Kind.EPISODE && series != null && detail !is Detail.Show) {
+            detail = Detail.Show(Series(series, e.group, e.logo, emptyList(), e.xtreamId))
+        }
+        activity.startActivity(PlayerActivity.intent(activity, e, resume))
+    }
     val open: (Detail) -> Unit = { detail = it }
 
     LaunchedEffect(Unit) {

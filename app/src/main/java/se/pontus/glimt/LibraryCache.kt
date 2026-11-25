@@ -11,7 +11,7 @@ import java.io.File
  * så att appen startar direkt i stället för att tolka om stora JSON-filer.
  */
 object LibraryCache {
-    private const val MAGIC = 0x474C4233 // "GLB3"
+    private const val MAGIC = 0x474C4234 // "GLB4"
 
     fun write(lib: Library, file: File, sourceUrl: String) {
         val tmp = File(file.parentFile, file.name + ".tmp")
@@ -44,6 +44,13 @@ object LibraryCache {
             }
             out.writeInt(lib.adultGroups.size)
             lib.adultGroups.forEach { out.writeUTF(it) }
+            out.writeInt(lib.liveGroups.size)
+            for (g in lib.liveGroups) {
+                out.writeUTF(g)
+                val list = lib.live[g].orEmpty()
+                out.writeInt(list.size)
+                for (e in list) writeEntry(out, e)
+            }
         }
         if (!tmp.renameTo(file)) {
             tmp.copyTo(file, overwrite = true)
@@ -90,7 +97,17 @@ object LibraryCache {
             }
             val adult = HashSet<String>()
             repeat(inp.readInt()) { adult += inp.readUTF() }
-            return Library(movieGroups, movies, seriesGroups, series, adult)
+            val liveGroups = ArrayList<String>()
+            val live = LinkedHashMap<String, List<Entry>>()
+            repeat(inp.readInt()) {
+                val g = inp.readUTF()
+                val n = inp.readInt()
+                val list = ArrayList<Entry>(n)
+                repeat(n) { list += readEntry(inp, g) }
+                liveGroups += g
+                live[g] = list
+            }
+            return Library(movieGroups, movies, seriesGroups, series, adult, liveGroups, live)
         }
     }
 

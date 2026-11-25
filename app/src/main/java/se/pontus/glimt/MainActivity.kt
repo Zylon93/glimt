@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Mic
@@ -104,6 +105,7 @@ internal enum class Section(val label: String, val icon: ImageVector) {
     SEARCH("Sök", Icons.Rounded.Search),
     MOVIES("Filmer", Icons.Rounded.Movie),
     SERIES("Serier", Icons.Rounded.Tv),
+    LIVE("Live-TV", Icons.Rounded.LiveTv),
     FAVORITES("Favoriter", Icons.Rounded.Favorite),
     HISTORY("Historik", Icons.Rounded.History),
     SETTINGS("Inställningar", Icons.Rounded.Settings),
@@ -254,6 +256,7 @@ private fun App(prefs: Prefs) {
                             Section.SEARCH -> SearchScreen(lib, onOpen = open)
                             Section.MOVIES -> Browser(browseLib, seriesMode = false, isGenre = genreLib != null, onOpen = open)
                             Section.SERIES -> Browser(browseLib, seriesMode = true, isGenre = genreLib != null, onOpen = open)
+                            Section.LIVE -> LiveScreen(lib) { e -> play(e, false) }
                             Section.FAVORITES -> FavoritesScreen(open)
                             Section.HISTORY -> HistoryScreen(play)
                             Section.SETTINGS -> Unit
@@ -677,7 +680,9 @@ private fun CategoryScreen(lib: Library?) {
     }
     val hidden by Store.hidden.collectAsState()
     val cats = remember(lib) {
-        (lib.movieGroups.map { it to (lib.movies[it]?.size ?: 0) } + lib.seriesGroups.map { it to (lib.series[it]?.size ?: 0) })
+        (lib.movieGroups.map { it to (lib.movies[it]?.size ?: 0) } +
+            lib.seriesGroups.map { it to (lib.series[it]?.size ?: 0) } +
+            lib.liveGroups.map { it to (lib.live[it]?.size ?: 0) })
             .groupBy({ it.first }, { it.second })
             .map { (name, sizes) -> name to sizes.sum() }
     }

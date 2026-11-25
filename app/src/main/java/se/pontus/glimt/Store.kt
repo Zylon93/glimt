@@ -113,11 +113,24 @@ object Store {
         _genreMode.value = prefs.getBoolean("genre_mode", true)
         _tmdbKey.value = prefs.getString("tmdb_key", "").orEmpty()
         _hidden.value = prefs.getStringSet("hidden", emptySet())?.toSet() ?: emptySet()
+        _favChannels.value = readArray("fav_channels") { entryFromJson(it) }
         _favMovies.value = readArray("fav_movies") { entryFromJson(it) }
         _favSeries.value = readArray("fav_series") { seriesFromJson(it) }
         _history.value = readArray("history") { o ->
             Progress(entryFromJson(o.getJSONObject("entry")), o.optLong("pos"), o.optLong("dur"), o.optLong("t"))
         }
+    }
+
+    // ---------- Favoritkanaler (live-TV) ----------
+
+    private val _favChannels = MutableStateFlow<List<Entry>>(emptyList())
+    val favChannels: StateFlow<List<Entry>> = _favChannels
+
+    fun toggleFavoriteChannel(e: Entry) {
+        _favChannels.value =
+            if (_favChannels.value.any { it.url == e.url }) _favChannels.value.filterNot { it.url == e.url }
+            else _favChannels.value + e
+        writeArray("fav_channels", _favChannels.value) { entryToJson(it) }
     }
 
     // ---------- Favoriter ----------
@@ -159,6 +172,7 @@ object Store {
         finished: Boolean = duration > 0 && position > duration * 0.93,
         next: Entry? = null,
     ) {
+        if (e.kind == Kind.LIVE) return // live-TV har ingen position att fortsätta från
         // Bara öppnad några sekunder: ändra ingenting
         if (!finished && position < 10_000) return
         var rest = _history.value.filterNot { it.entry.url == e.url }
@@ -216,7 +230,7 @@ object Store {
         group = o.optString("group"),
         logo = o.optString("logo").ifBlank { null },
         url = o.optString("url"),
-        kind = if (o.optString("kind") == Kind.EPISODE.name) Kind.EPISODE else Kind.MOVIE,
+        kind = runCatching { Kind.valueOf(o.optString("kind")) }.getOrDefault(Kind.MOVIE),
         series = o.optString("series").ifBlank { null },
         season = o.optInt("season"),
         episode = o.optInt("episode"),

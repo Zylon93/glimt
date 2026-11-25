@@ -150,6 +150,14 @@ class PlayerActivity : ComponentActivity() {
     private var countdownCancelledFor by mutableStateOf<String?>(null)
     private var countdownLeft by mutableStateOf(10)
 
+    // ---- Live-TV ----
+    private val isLive get() = ::entry.isInitialized && entry.kind == Kind.LIVE
+    private var liveMode by mutableStateOf(false)
+    private var channels by mutableStateOf<List<Entry>>(emptyList())
+    private var epg by mutableStateOf<List<Xtream.Program>>(emptyList())
+    private var epgJob: Job? = null
+    private var liveRetries = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -172,6 +180,16 @@ class PlayerActivity : ComponentActivity() {
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                // Live-strömmar avbryts ibland – försök igen några gånger innan felet visas
+                if (isLive && liveRetries < 3) {
+                    liveRetries++
+                    lifecycleScope.launch {
+                        delay(1500)
+                        player.prepare()
+                        player.playWhenReady = true
+                    }
+                    return
+                }
                 toast("Uppspelningsfel: ${error.errorCodeName}")
             }
 
@@ -240,6 +258,12 @@ class PlayerActivity : ComponentActivity() {
             .build()
         countdownCancelledFor = null
         scrubTarget = null
+        liveMode = e.kind == Kind.LIVE
+        liveRetries = 0
+        if (liveMode) {
+            loadLive(e)
+            return
+        }
         val saved = if (resume) Store.progressFor(e.url) else null
         if (saved != null && saved.position > 30_000) {
             player.setMediaItem(baseItem, saved.position)
@@ -294,17 +318,61 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /** Nästa avsnitt, eller nästa kanal (runt) i live-TV. */
     private fun nextEpisode(): Entry? {
+        if (liveMode) {
+            val i = channels.indexOfFirst { it.url == currentUrl }
+            return if (i >= 0 && channels.size > 1) channels[(i + 1) % channels.size] else null
+        }
         val i = episodes.indexOfFirst { it.url == currentUrl }
         return if (i >= 0) episodes.getOrNull(i + 1) else null
     }
 
     private fun previousEpisode(): Entry? {
+        if (liveMode) {
+            val i = channels.indexOfFirst { it.url == currentUrl }
+            return if (i >= 0 && channels.size > 1) channels[(i - 1 + channels.size) % channels.size] else null
+        }
         val i = episodes.indexOfFirst { it.url == currentUrl }
         return if (i > 0) episodes[i - 1] else null
     }
 
+    /** Startar en kanal: ingen återupptagning, inga nedladdade undertexter, tablå i stället. */
+    private fun loadLive(e: Entry) {
+        player.setMediaItem(baseItem)
+        player.prepare()
+        player.playWhenReady = true
+        title = e.title
+        subtitleLine = null
+        extrasJob?.cancel()
+        // Kanallistan för upp/ner: favoriter om kanalen är en favorit och inte finns i kategorin
+        val inGroup = Current.library?.live?.get(e.group).orEmpty()
+        val favs = Store.favChannels.value
+        channels = when {
+            inGroup.any { it.url == e.url } -> inGroup
+            favs.any { it.url == e.url } -> favs
+            else -> listOf(e)
+        }
+        epg = emptyList()
+        epgJob?.cancel()
+        epgJob = lifecycleScope.launch {
+            val acc = Repo.account ?: return@launch
+            val id = e.xtreamId ?: return@launch
+            while (true) {
+                epg = runCatching { Xtream.shortEpg(acc, id) }.getOrDefault(emptyList())
+                subtitleLine = epg.firstOrNull { it.start <= System.currentTimeMillis() }?.title
+                delay(60_000)
+            }
+        }
+    }
+
     private fun onEnded() {
+        if (liveMode) {
+            // En live-ström ska inte ta slut – starta om den
+            player.prepare()
+            player.playWhenReady = true
+            return
+        }
         val next = nextEpisode()
         if (next != null) {
             loadEntry(next, resume = false) // sparar det här avsnittet som färdigsett
@@ -501,6 +569,9 @@ class PlayerActivity : ComponentActivity() {
                             }
                             true
                         }
+                        liveMode && ev.key == Key.DirectionUp -> { nextEpisode()?.let { loadEntry(it, resume = false) }; true }
+                        liveMode && ev.key == Key.DirectionDown -> { previousEpisode()?.let { loadEntry(it, resume = false) }; true }
+                        liveMode && (ev.key == Key.DirectionLeft || ev.key == Key.DirectionRight) -> { overlay = true; true }
                         ev.key == Key.DirectionLeft -> { scrub(-1, ev.nativeKeyEvent.repeatCount); overlay = true; true }
                         ev.key == Key.DirectionRight -> { scrub(1, ev.nativeKeyEvent.repeatCount); overlay = true; true }
                         ev.key == Key.DirectionUp || ev.key == Key.DirectionDown -> { overlay = true; true }
@@ -599,27 +670,31 @@ class PlayerActivity : ComponentActivity() {
             }
 
             Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start = 48.dp, end = 48.dp, bottom = 30.dp)) {
-                Row(Modifier.fillMaxWidth()) {
-                    Spacer(Modifier.weight(1f))
-                    if (duration > 0) Text("−" + fmt(duration - position), color = Color.White, fontSize = 18.sp)
+                if (liveMode) {
+                    LiveInfo()
+                } else {
+                    Row(Modifier.fillMaxWidth()) {
+                        Spacer(Modifier.weight(1f))
+                        if (duration > 0) Text("−" + fmt(duration - position), color = Color.White, fontSize = 18.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SeekBar()
+                    Spacer(Modifier.height(6.dp))
+                    Text(fmt(position), color = Color.White, fontSize = 16.sp)
                 }
-                Spacer(Modifier.height(8.dp))
-                SeekBar()
-                Spacer(Modifier.height(6.dp))
-                Text(fmt(position), color = Color.White, fontSize = 16.sp)
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (prev != null) RoundButton(onClick = { loadEntry(prev, resume = false) }) { c -> Ic(Icons.Rounded.SkipPrevious, c) }
-                    RoundButton(onClick = { seekBy(-10_000) }) { c -> Ic(Icons.Rounded.Replay10, c) }
+                    if (!liveMode) RoundButton(onClick = { seekBy(-10_000) }) { c -> Ic(Icons.Rounded.Replay10, c) }
                     RoundButton(size = 78.dp, focusRequester = playFocus, onClick = { togglePlay() }) { c ->
                         Ic(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, c, 40.dp)
                     }
-                    RoundButton(onClick = { seekBy(10_000) }) { c -> Ic(Icons.Rounded.Forward10, c) }
+                    if (!liveMode) RoundButton(onClick = { seekBy(10_000) }) { c -> Ic(Icons.Rounded.Forward10, c) }
                     if (next != null) RoundButton(onClick = { loadEntry(next, resume = false) }) { c -> Ic(Icons.Rounded.SkipNext, c) }
                     Spacer(Modifier.weight(1f))
                     Column(horizontalAlignment = Alignment.End) {
                         Row {
-                            RoundButton(onClick = { showSubtitleMenu() }) { c -> Ic(Icons.Rounded.Subtitles, c) }
+                            if (!liveMode) RoundButton(onClick = { showSubtitleMenu() }) { c -> Ic(Icons.Rounded.Subtitles, c) }
                             RoundButton(onClick = { showAudioMenu() }) { c -> Ic(Icons.Rounded.Audiotrack, c) }
                         }
                         if (duration > 0) {
@@ -630,6 +705,47 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Live: LIVE-märke, programmet som går nu med förlopp, och vad som kommer sedan. */
+    @Composable
+    private fun LiveInfo() {
+        val now = System.currentTimeMillis() + (position * 0) // läs position så att raden uppdateras
+        val current = epg.firstOrNull { it.start <= now && it.end > now }
+        val upcoming = epg.firstOrNull { it.start > now }
+        val hm = SimpleDateFormat("HH:mm", Locale.getDefault())
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "LIVE",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.background(Color(0xFFE5484D), RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 3.dp),
+            )
+            Spacer(Modifier.width(14.dp))
+            if (current != null) {
+                Text("${hm.format(Date(current.start))}–${hm.format(Date(current.end))}  ${current.title}", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            } else {
+                Text("Ingen tablå för den här kanalen", color = Muted, fontSize = 16.sp)
+            }
+        }
+        if (current != null) {
+            Spacer(Modifier.height(10.dp))
+            val f = ((now - current.start).toFloat() / (current.end - current.start)).coerceIn(0f, 1f)
+            Box(Modifier.fillMaxWidth().height(5.dp).background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(3.dp))) {
+                Box(Modifier.fillMaxWidth(f).height(5.dp).background(AccentBrush, RoundedCornerShape(3.dp)))
+            }
+            if (current.description.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(current.description, color = TextBright, fontSize = 14.sp, maxLines = 2)
+            }
+        }
+        if (upcoming != null) {
+            Spacer(Modifier.height(6.dp))
+            Text("Sedan ${hm.format(Date(upcoming.start))}  ${upcoming.title}", color = Muted, fontSize = 15.sp, maxLines = 1)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("Upp/ner byter kanal när menyn är dold", color = Muted, fontSize = 13.sp)
     }
 
     /** Tidslinje. Står fokus på den spolar vänster/höger 10 sekunder. */

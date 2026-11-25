@@ -8,7 +8,7 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
 
-enum class Kind { MOVIE, EPISODE }
+enum class Kind { MOVIE, EPISODE, LIVE }
 
 data class Entry(
     val title: String,
@@ -55,6 +55,9 @@ class Library(
     val series: Map<String, List<Series>>,
     /** Kategorier med vuxeninnehåll (enligt namn eller leverantörens is_adult-flagga). */
     val adultGroups: Set<String> = emptySet(),
+    /** Live-TV: kanaler (Entry med kind = LIVE) per kategori. */
+    val liveGroups: List<String> = emptyList(),
+    val live: Map<String, List<Entry>> = emptyMap(),
 ) {
     val allMovies: List<Entry> by lazy { movies.values.flatten() }
     val allSeries: List<Series> by lazy { series.values.flatten() }
@@ -191,7 +194,9 @@ fun Library.filtered(hidden: Set<String>, showAdult: Boolean = false): Library {
     for (g in mg) movies[g].orEmpty().filter { keepTitle(it.title) }.takeIf { it.isNotEmpty() }?.let { mm[g] = it }
     val sm = LinkedHashMap<String, List<Series>>()
     for (g in sg) series[g].orEmpty().filter { keepTitle(it.name) }.takeIf { it.isNotEmpty() }?.let { sm[g] = it }
-    return Library(mm.keys.toList(), mm, sm.keys.toList(), sm, adultGroups)
+    val lm = LinkedHashMap<String, List<Entry>>()
+    for (g in liveGroups.filter { visible(it) }) live[g].orEmpty().filter { keepTitle(it.title) }.takeIf { it.isNotEmpty() }?.let { lm[g] = it }
+    return Library(mm.keys.toList(), mm, sm.keys.toList(), sm, adultGroups, lm.keys.toList(), lm)
 }
 
 object M3u {
@@ -202,6 +207,7 @@ object M3u {
     fun parse(reader: BufferedReader): Library {
         val movies = LinkedHashMap<String, MutableList<Entry>>()
         val episodes = LinkedHashMap<String, LinkedHashMap<String, MutableList<Entry>>>()
+        val live = LinkedHashMap<String, MutableList<Entry>>()
         var info: String? = null
         var extGroup: String? = null
 
@@ -217,7 +223,7 @@ object M3u {
                 else -> {
                     val inf = info
                     info = null
-                    if (inf != null) add(inf, extGroup, line, movies, episodes)
+                    if (inf != null) add(inf, extGroup, line, movies, episodes, live)
                 }
             }
         }
@@ -233,7 +239,7 @@ object M3u {
                 )
             }
         }
-        return Library(movies.keys.toList(), movies, series.keys.toList(), series)
+        return Library(movies.keys.toList(), movies, series.keys.toList(), series, liveGroups = live.keys.toList(), live = live)
     }
 
     private fun add(
@@ -242,12 +248,13 @@ object M3u {
         url: String,
         movies: MutableMap<String, MutableList<Entry>>,
         episodes: MutableMap<String, LinkedHashMap<String, MutableList<Entry>>>,
+        live: MutableMap<String, MutableList<Entry>>,
     ) {
         val path = url.substringBefore('?').lowercase()
         val ext = path.substringAfterLast('.', "")
         val seriesUrl = "/series/" in path
         val movieUrl = "/movie/" in path
-        if (!seriesUrl && !movieUrl && ext !in vodExtensions) return // live-tv o.d.
+        val isLive = !seriesUrl && !movieUrl && ext !in vodExtensions
 
         val lastQuote = inf.lastIndexOf('"')
         val comma = inf.indexOf(',', if (lastQuote >= 0) lastQuote else 0)
@@ -260,6 +267,10 @@ object M3u {
             .ifBlank { "Okänd titel" }
         val group = attrs["group-title"]?.takeIf { it.isNotBlank() } ?: extGroup ?: "Övrigt"
         val logo = attrs["tvg-logo"]?.takeIf { it.startsWith("http") }
+        if (isLive) {
+            live.getOrPut(group) { ArrayList() }.add(Entry(title, group, logo, url, Kind.LIVE))
+            return
+        }
 
         val match = episodeRe.find(title)
         if (seriesUrl || (match != null && !movieUrl)) {
@@ -428,6 +439,6 @@ fun Library.sortedFor(sort: Sort): Library {
     return Library(
         movieGroups, movies.mapValues { it.value.sortedWith(me) },
         seriesGroups, series.mapValues { it.value.sortedWith(se) },
-        adultGroups,
+        adultGroups, liveGroups, live,
     )
 }

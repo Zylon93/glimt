@@ -21,6 +21,7 @@ data class XtreamAccount(val base: String, val user: String, val pass: String) {
         "$base/player_api.php?username=${enc(user)}&password=${enc(pass)}&action=$action$extra"
     fun movieUrl(id: String, ext: String) = "$base/movie/$user/$pass/$id.${ext.ifBlank { "mp4" }}"
     fun episodeUrl(id: String, ext: String) = "$base/series/$user/$pass/$id.${ext.ifBlank { "mp4" }}"
+    fun liveUrl(id: String) = "$base/live/$user/$pass/$id.ts"
 }
 
 object Xtream {
@@ -43,6 +44,9 @@ object Xtream {
         val vodFile = fetch(acc, "get_vod_streams", File(dir, "xc_vod.json"), force, status, "filmer")
         val serCatFile = fetch(acc, "get_series_categories", File(dir, "xc_series_cat.json"), force, status, "seriekategorier")
         val serFile = fetch(acc, "get_series", File(dir, "xc_series.json"), force, status, "serier")
+        // Live-TV är frivilligt: misslyckas det visas filmer och serier ändå
+        val liveCatFile = runCatching { fetch(acc, "get_live_categories", File(dir, "xc_live_cat.json"), force, status, "kanalkategorier") }.getOrNull()
+        val liveFile = runCatching { fetch(acc, "get_live_streams", File(dir, "xc_live.json"), force, status, "kanaler") }.getOrNull()
 
         status("Läser in biblioteket…")
 
@@ -95,7 +99,31 @@ object Xtream {
         }
         series.entries.removeAll { it.value.isEmpty() }
 
-        return Library(movies.keys.toList(), movies, series.keys.toList(), series, adult)
+        // Live-TV, i leverantörens kategori- och kanalordning
+        val live = LinkedHashMap<String, MutableList<Entry>>()
+        if (liveCatFile != null && liveFile != null) {
+            runCatching {
+                val liveCats = categories(liveCatFile)
+                liveCats.values.forEach { live[it] = ArrayList() }
+                val numbers = HashMap<Entry, Int>()
+                readObjects(liveFile) { o ->
+                    val id = o["stream_id"] ?: return@readObjects
+                    val group = liveCats[o["category_id"]] ?: "Övrigt"
+                    if (o["is_adult"] == "1" || o["is_adult"] == "true") adult += group
+                    val e = Entry(
+                        o["name"].orEmpty().ifBlank { "Kanal $id" }, group,
+                        o["stream_icon"]?.takeIf { it.startsWith("http") },
+                        acc.liveUrl(id), Kind.LIVE, xtreamId = id,
+                    )
+                    numbers[e] = o["num"]?.toIntOrNull() ?: Int.MAX_VALUE
+                    live.getOrPut(group) { ArrayList() }.add(e)
+                }
+                live.values.forEach { l -> l.sortBy { numbers[it] ?: Int.MAX_VALUE } }
+                live.entries.removeAll { it.value.isEmpty() }
+            }
+        }
+
+        return Library(movies.keys.toList(), movies, series.keys.toList(), series, adult, live.keys.toList(), live)
     }
 
     private val seriesCache = HashMap<String, Pair<Details?, List<Entry>>>()
@@ -169,6 +197,37 @@ object Xtream {
             imdbId = info.optString("imdb_id").takeIf { it.startsWith("tt") },
         )
     }
+
+    // ---------- Programtablå (EPG) ----------
+
+    /** Ett program i tablån. Tider i millisekunder. */
+    data class Program(val title: String, val start: Long, val end: Long, val description: String)
+
+    private val epgCache = HashMap<String, Pair<Long, List<Program>>>()
+
+    /** Nu och kommande program för en kanal (get_short_epg). Cachas i fem minuter. */
+    suspend fun shortEpg(acc: XtreamAccount, streamId: String, limit: Int = 4): List<Program> {
+        val now = System.currentTimeMillis()
+        synchronized(epgCache) { epgCache[streamId] }?.let { (t, list) -> if (now - t < 5 * 60_000) return list }
+        val list = withContext(Dispatchers.IO) {
+            val json = JSONObject(Net.bytes(acc.api("get_short_epg", "&stream_id=$streamId&limit=$limit")).decodeToString())
+            val arr = json.optJSONArray("epg_listings") ?: return@withContext emptyList()
+            val out = ArrayList<Program>()
+            for (i in 0 until arr.length()) {
+                val p = arr.optJSONObject(i) ?: continue
+                val start = p.optString("start_timestamp").toLongOrNull()?.times(1000) ?: continue
+                val end = (p.optString("stop_timestamp").ifBlank { p.optString("end_timestamp") }).toLongOrNull()?.times(1000) ?: continue
+                out += Program(b64(p.optString("title")), start, end, b64(p.optString("description")))
+            }
+            out.filter { it.end > now }.sortedBy { it.start }
+        }
+        synchronized(epgCache) { epgCache[streamId] = now to list }
+        return list
+    }
+
+    /** Xtream skickar titlar base64-kodade. */
+    private fun b64(s: String): String =
+        runCatching { String(android.util.Base64.decode(s, android.util.Base64.DEFAULT), Charsets.UTF_8) }.getOrDefault(s).trim()
 
     // ---------- Hjälpfunktioner ----------
 

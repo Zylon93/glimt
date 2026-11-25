@@ -82,7 +82,7 @@ object Genres {
         series.values.forEach { l -> l.sortByDescending { it.added } }
         movies.entries.removeAll { it.value.isEmpty() }
         series.entries.removeAll { it.value.isEmpty() }
-        return Library(movies.keys.toList(), movies, series.keys.toList(), series, lib.adultGroups)
+        return Library(movies.keys.toList(), movies, series.keys.toList(), series, lib.adultGroups, lib.liveGroups, lib.live)
     }
 }
 

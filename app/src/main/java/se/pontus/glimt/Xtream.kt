@@ -63,6 +63,10 @@ object Xtream {
                         title, group, logo, acc.movieUrl(id, o["container_extension"].orEmpty()), Kind.MOVIE,
                         xtreamId = id, added = o["added"]?.toLongOrNull() ?: 0L,
                         tmdb = (o["tmdb"] ?: o["tmdb_id"])?.takeIf { (it.toIntOrNull() ?: 0) > 0 },
+                        rating = rating(o),
+                        year = o["year"]?.toIntOrNull()?.takeIf { it in 1900..2100 }
+                            ?: o["releaseDate"]?.take(4)?.toIntOrNull()?.takeIf { it in 1900..2100 }
+                            ?: yearOf(title),
                     )
                 )
         }
@@ -79,7 +83,15 @@ object Xtream {
             val logo = o["cover"]?.takeIf { it.startsWith("http") }
             val added = (o["last_modified"] ?: o["added"])?.toLongOrNull() ?: 0L
             val tmdb = (o["tmdb"] ?: o["tmdb_id"])?.takeIf { (it.toIntOrNull() ?: 0) > 0 }
-            series.getOrPut(group) { ArrayList() }.add(Series(name, group, logo, emptyList(), xtreamId = id, added = added, tmdb = tmdb))
+            series.getOrPut(group) { ArrayList() }.add(
+                Series(
+                    name, group, logo, emptyList(), xtreamId = id, added = added, tmdb = tmdb,
+                    rating = rating(o),
+                    year = o["year"]?.toIntOrNull()?.takeIf { it in 1900..2100 }
+                        ?: (o["releaseDate"] ?: o["release_date"])?.take(4)?.toIntOrNull()?.takeIf { it in 1900..2100 }
+                        ?: yearOf(name),
+                )
+            )
         }
         series.entries.removeAll { it.value.isEmpty() }
 
@@ -159,6 +171,15 @@ object Xtream {
     }
 
     // ---------- Hjälpfunktioner ----------
+
+    /** Betyg 0–10 ur "rating" eller "rating_5based". */
+    private fun rating(o: Map<String, String>): Float {
+        val r = o["rating"]?.replace(',', '.')?.toFloatOrNull()
+        if (r != null && r > 0f && r <= 10f) return r
+        val r5 = o["rating_5based"]?.replace(',', '.')?.toFloatOrNull()
+        if (r5 != null && r5 > 0f && r5 <= 5f) return r5 * 2
+        return 0f
+    }
 
     /** Laddar ner ett API-svar till fil (cache). Används igen tills man trycker "Spara och ladda om". */
     private fun fetch(acc: XtreamAccount, action: String, file: File, force: Boolean, status: (String) -> Unit, what: String): File {

@@ -184,6 +184,64 @@ object Tmdb {
         }
     }
 
+    // ---------- Skådespelare, trailer och rekommendationer för detaljsidan ----------
+
+    data class Person(val name: String, val role: String, val photo: String?)
+    data class Extras(
+        val cast: List<Person>,
+        val trailerKey: String?,
+        /** Rekommenderade titlar (titel, år) att matcha mot biblioteket. */
+        val recommendations: List<Pair<String, Int>>,
+    )
+
+    private val extrasCache = HashMap<String, Extras>()
+
+    /** null om ingen nyckel finns eller titeln inte hittas. */
+    suspend fun extras(key: String, tv: Boolean, tmdbId: String?, rawTitle: String): Extras? {
+        if (key.isBlank()) return null
+        val cacheKey = (if (tv) "tv:" else "m:") + (tmdbId ?: rawTitle)
+        synchronized(extrasCache) { extrasCache[cacheKey] }?.let { return it }
+        return kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val type = if (tv) "tv" else "movie"
+            val id = tmdbId ?: run {
+                val (title, year) = Subtitles.clean(rawTitle)
+                val q = URLEncoder.encode(title, "UTF-8")
+                val yearParam = if (year == null) "" else if (tv) "&first_air_date_year=$year" else "&year=$year"
+                get(key, "/search/$type?query=$q$yearParam&include_adult=false").optJSONArray("results")
+                    ?.optJSONObject(0)?.optInt("id")?.takeIf { it > 0 }?.toString()
+            } ?: return@withContext null
+            val o = get(key, "/$type/$id?append_to_response=credits,videos,recommendations&language=sv-SE&include_video_language=sv,en")
+            val cast = ArrayList<Person>()
+            o.optJSONObject("credits")?.optJSONArray("cast")?.let { arr ->
+                for (i in 0 until minOf(arr.length(), 14)) {
+                    val p = arr.optJSONObject(i) ?: continue
+                    val path = p.optString("profile_path").takeIf { it.startsWith("/") }
+                    cast += Person(p.optString("name"), p.optString("character"), path?.let { "https://image.tmdb.org/t/p/w185$it" })
+                }
+            }
+            var trailer: String? = null
+            o.optJSONObject("videos")?.optJSONArray("results")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val v = arr.optJSONObject(i) ?: continue
+                    if (v.optString("site") == "YouTube" && v.optString("type") == "Trailer") {
+                        trailer = v.optString("key")
+                        if (v.optString("iso_639_1") == "sv") break
+                    }
+                }
+            }
+            val recs = ArrayList<Pair<String, Int>>()
+            o.optJSONObject("recommendations")?.optJSONArray("results")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val r = arr.optJSONObject(i) ?: continue
+                    val t = r.optString(if (tv) "name" else "title").ifBlank { r.optString(if (tv) "original_name" else "original_title") }
+                    val d = r.optString(if (tv) "first_air_date" else "release_date")
+                    if (t.isNotBlank()) recs += t to (d.take(4).toIntOrNull() ?: 0)
+                }
+            }
+            Extras(cast, trailer, recs).also { synchronized(extrasCache) { extrasCache[cacheKey] = it } }
+        }
+    }
+
     private class AuthError : IOException("TMDB 401")
 
     private fun get(key: String, path: String): JSONObject {

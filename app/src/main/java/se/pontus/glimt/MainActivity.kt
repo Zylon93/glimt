@@ -42,7 +42,9 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tv
@@ -129,10 +131,12 @@ private fun App(prefs: Prefs) {
         kotlinx.coroutines.delay(1500) // vänta tills man skrivit klart nyckeln
         if (filteredLib != null && genreMode) Tmdb.start(appContext, filteredLib, tmdbKey)
     }
+    androidx.compose.runtime.SideEffect { Current.library = filteredLib }
     val genreLib by androidx.compose.runtime.produceState<Library?>(null, filteredLib, tmdbVersion, genreMode) {
         val l = filteredLib
         value = if (l != null && genreMode) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Genres.build(l) } else null
     }
+    androidx.compose.runtime.SideEffect { Current.genreLibrary = genreLib }
     val play: (Entry, Boolean) -> Unit = { e, resume ->
         // Startas ett avsnitt utanför seriens sida (t.ex. från Fortsätt titta) öppnas serien
         // bakom spelaren, så att Tillbaka leder dit i stället för till startsidan.
@@ -224,7 +228,7 @@ private fun App(prefs: Prefs) {
         ) {
             val d = detail
             when {
-                d is Detail.Movie -> MovieDetail(d.entry, play)
+                d is Detail.Movie -> MovieDetail(d.entry, play, open)
                 d is Detail.Show -> SeriesDetail(d.series, play)
                 section == Section.SETTINGS && showCategories ->
                     CategoryScreen((state as? LoadState.Ready)?.library)
@@ -387,7 +391,9 @@ private fun now(): String =
 
 /** Filmer eller serier: en vågrät rad per kategori (som på Netflix), "Visa alla" öppnar hela kategorin. */
 @Composable
-private fun Browser(lib: Library, seriesMode: Boolean, isGenre: Boolean, onOpen: (Detail) -> Unit) {
+private fun Browser(rawLib: Library, seriesMode: Boolean, isGenre: Boolean, onOpen: (Detail) -> Unit) {
+    val sort by Store.sort.collectAsState()
+    val lib = remember(rawLib, sort) { rawLib.sortedFor(sort) }
     val groups = if (seriesMode) lib.seriesGroups else lib.movieGroups
     if (groups.isEmpty()) {
         Message(if (seriesMode) "Inga serier hittades i spellistan." else "Inga filmer hittades i spellistan.")
@@ -402,11 +408,12 @@ private fun Browser(lib: Library, seriesMode: Boolean, isGenre: Boolean, onOpen:
         if (term.isNotEmpty()) search = "" else openGroup = null
     }
     val movieCard: @Composable (Entry, Modifier) -> Unit = { e, m ->
-        PosterCard(e.title, e.logo, null, m, favorite = favMovies.any { it.url == e.url }) { onOpen(Detail.Movie(e)) }
+        PosterCard(e.title, e.logo, null, m, badges = entryBadges(e), favorite = favMovies.any { it.url == e.url }) { onOpen(Detail.Movie(e)) }
     }
     val seriesCard: @Composable (Series, Modifier) -> Unit = { s, m ->
         PosterCard(
             s.name, s.logo, if (s.xtreamId == null) "${s.episodes.size} avsnitt" else null, m,
+            badges = seriesBadges(s),
             favorite = favSeries.any { (it.xtreamId ?: it.name) == (s.xtreamId ?: s.name) },
         ) { onOpen(Detail.Show(s)) }
     }
@@ -423,6 +430,20 @@ private fun Browser(lib: Library, seriesMode: Boolean, isGenre: Boolean, onOpen:
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(20.dp))
+            // Sortering: OK växlar Nyast → A–Ö → År → Betyg
+            FocusBox(onClick = { Store.setSort(Sort.entries[(sort.ordinal + 1) % Sort.entries.size]) }, shape = RoundedCornerShape(50), glow = false) { focused ->
+                Row(
+                    Modifier
+                        .background(if (focused) Color.White else Surface1)
+                        .padding(horizontal = 18.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.Sort, contentDescription = null, tint = if (focused) OnAccent else Accent, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Sortera: ${sort.label}", color = if (focused) OnAccent else Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
             GlimtTextField(
                 value = search,
                 onValueChange = { search = it },
@@ -530,6 +551,25 @@ private fun SearchScreen(lib: Library, onOpen: (Detail) -> Unit) {
     var searching by remember { mutableStateOf(false) }
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    val context = LocalContext.current
+    // Röstsökning via Googles taligenkänning (finns på Google TV)
+    val voice = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { r ->
+        val text = r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!text.isNullOrBlank()) query = text
+    }
+    val startVoice = {
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "sv-SE")
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Säg en film eller serie")
+        try {
+            voice.launch(intent)
+        } catch (e: android.content.ActivityNotFoundException) {
+            Toast.makeText(context, "Röstsökning finns inte på den här enheten", Toast.LENGTH_LONG).show()
+        }
+    }
     LaunchedEffect(query) {
         val term = query.trim()
         if (term.length < 2) {
@@ -561,19 +601,23 @@ private fun SearchScreen(lib: Library, onOpen: (Detail) -> Unit) {
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 24.dp, end = 12.dp)) {
         Text("Sök", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(14.dp))
-        GlimtTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = "Sök film eller serie…",
-            leading = Icons.Rounded.Search,
-            modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
-            focusRequester = fieldFocus,
-        )
+        Row(verticalAlignment = Alignment.Bottom) {
+            GlimtTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = "Sök film eller serie…",
+                leading = Icons.Rounded.Search,
+                modifier = Modifier.widthIn(max = 760.dp).weight(1f, fill = false).width(760.dp),
+                focusRequester = fieldFocus,
+            )
+            Spacer(Modifier.width(14.dp))
+            PillButton("Prata", primary = true, icon = Icons.Rounded.Mic) { startVoice() }
+        }
         Spacer(Modifier.height(8.dp))
         val (movieCount, seriesCount) = counts
         Text(
             when {
-                query.trim().length < 2 -> "Skriv minst två tecken. Tips: håll inne mikrofonknappen på fjärrkontrollen för att prata."
+                query.trim().length < 2 -> "Skriv minst två tecken, eller tryck Prata och säg titeln."
                 searching -> "Söker…"
                 else -> "$movieCount filmer · $seriesCount serier"
             },
@@ -584,8 +628,8 @@ private fun SearchScreen(lib: Library, onOpen: (Detail) -> Unit) {
         if (hits.isNotEmpty()) {
             Grid(hits, emptyText = "") { h ->
                 when (h) {
-                    is Hit.S -> PosterCard(h.s.name, h.s.logo, "Serie") { onOpen(Detail.Show(h.s)) }
-                    is Hit.M -> PosterCard(h.e.title, h.e.logo, h.e.group) { onOpen(Detail.Movie(h.e)) }
+                    is Hit.S -> PosterCard(h.s.name, h.s.logo, "Serie", badges = seriesBadges(h.s)) { onOpen(Detail.Show(h.s)) }
+                    is Hit.M -> PosterCard(h.e.title, h.e.logo, h.e.group, badges = entryBadges(h.e)) { onOpen(Detail.Movie(h.e)) }
                 }
             }
         } else if (query.trim().length >= 2 && !searching) {

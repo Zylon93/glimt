@@ -66,10 +66,50 @@ object Store {
         prefs.edit().putString("tmdb_key", v.trim()).apply()
     }
 
+    private val _sort = MutableStateFlow(Sort.NEWEST)
+    val sort: StateFlow<Sort> = _sort
+    fun setSort(v: Sort) {
+        _sort.value = v
+        prefs.edit().putString("sort", v.name).apply()
+    }
+
+    // ---------- Ljud och undertext per serie ----------
+
+    /** Sparat val för en serie: ljudspråk och om undertexter ska vara av. */
+    data class SeriesPref(val audio: String?, val subsOff: Boolean)
+
+    private val seriesPrefs = HashMap<String, SeriesPref>()
+
+    fun seriesPrefKey(e: Entry): String? =
+        if (e.kind == Kind.EPISODE && e.series != null) "s:" + (e.xtreamId ?: e.series) else null
+
+    fun seriesPref(e: Entry): SeriesPref? = seriesPrefKey(e)?.let { synchronized(seriesPrefs) { seriesPrefs[it] } }
+
+    fun setSeriesAudio(e: Entry, lang: String?) = updateSeriesPref(e) { it.copy(audio = lang) }
+    fun setSeriesSubsOff(e: Entry, off: Boolean) = updateSeriesPref(e) { it.copy(subsOff = off) }
+
+    private fun updateSeriesPref(e: Entry, change: (SeriesPref) -> SeriesPref) {
+        val key = seriesPrefKey(e) ?: return
+        val o = JSONObject()
+        synchronized(seriesPrefs) {
+            seriesPrefs[key] = change(seriesPrefs[key] ?: SeriesPref(null, false))
+            seriesPrefs.forEach { (k, v) -> o.put(k, JSONObject().put("audio", v.audio ?: "").put("off", v.subsOff)) }
+        }
+        prefs.edit().putString("series_prefs", o.toString()).apply()
+    }
+
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         prefs = context.getSharedPreferences("glimt_store", Context.MODE_PRIVATE)
         _showAdult.value = prefs.getBoolean("show_adult", false)
+        runCatching {
+            val o = JSONObject(prefs.getString("series_prefs", "{}") ?: "{}")
+            for (k in o.keys()) {
+                val v = o.getJSONObject(k)
+                seriesPrefs[k] = SeriesPref(v.optString("audio").ifBlank { null }, v.optBoolean("off", false))
+            }
+        }
+        _sort.value = runCatching { Sort.valueOf(prefs.getString("sort", "NEWEST") ?: "NEWEST") }.getOrDefault(Sort.NEWEST)
         _genreMode.value = prefs.getBoolean("genre_mode", true)
         _tmdbKey.value = prefs.getString("tmdb_key", "").orEmpty()
         _hidden.value = prefs.getStringSet("hidden", emptySet())?.toSet() ?: emptySet()

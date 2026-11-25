@@ -25,6 +25,10 @@ data class Entry(
     val added: Long = 0,
     /** TMDB-id om leverantören uppger det (används för genrer). */
     val tmdb: String? = null,
+    /** Betyg 0–10 från leverantören, 0 om okänt. */
+    val rating: Float = 0f,
+    /** Utgivningsår, 0 om okänt. */
+    val year: Int = 0,
 )
 
 data class Series(
@@ -38,6 +42,10 @@ data class Series(
     val added: Long = 0,
     /** TMDB-id om leverantören uppger det (används för genrer). */
     val tmdb: String? = null,
+    /** Betyg 0–10 från leverantören, 0 om okänt. */
+    val rating: Float = 0f,
+    /** Utgivningsår, 0 om okänt. */
+    val year: Int = 0,
 )
 
 class Library(
@@ -283,26 +291,55 @@ object Repo {
     var account: XtreamAccount? = null
         private set
 
+    /** Hur gammal listan får bli innan den hämtas om i bakgrunden. */
+    private const val REFRESH_AFTER_MS = 6 * 60 * 60 * 1000L
+
+    /**
+     * Läser in biblioteket. Finns en sparad, färdigtolkad kopia visas den direkt
+     * och listan uppdateras sedan i bakgrunden om den är äldre än sex timmar.
+     */
     suspend fun load(context: Context, url: String, forceDownload: Boolean): Unit = withContext(Dispatchers.IO) {
-        val file = File(context.filesDir, "playlist.m3u")
-        try {
-            val acc = Xtream.accountFrom(url)
-            account = acc
-            val library = if (acc != null) {
-                Xtream.load(context.filesDir, acc, forceDownload) { _state.value = LoadState.Loading(it) }
-            } else {
-                if (forceDownload || !file.exists() || file.length() == 0L) download(url, file)
-                _state.value = LoadState.Loading("Läser spellistan…")
-                file.bufferedReader(Charsets.UTF_8).use { M3u.parse(it) }
+        val cacheFile = File(context.filesDir, "library.bin")
+        val acc = Xtream.accountFrom(url)
+        account = acc
+        if (!forceDownload) {
+            val cached = runCatching { LibraryCache.read(cacheFile, url) }.getOrNull()
+            if (cached != null) {
+                _state.value = LoadState.Ready(cached)
+                if (System.currentTimeMillis() - cacheFile.lastModified() > REFRESH_AFTER_MS) {
+                    // Tyst uppdatering: behåll det gamla om något går fel
+                    runCatching { fetch(context, url, acc, force = true, quiet = true) }
+                        .onSuccess { lib ->
+                            _state.value = LoadState.Ready(lib)
+                            runCatching { LibraryCache.write(lib, cacheFile, url) }
+                        }
+                }
+                return@withContext
             }
+        }
+        try {
+            val library = fetch(context, url, acc, forceDownload, quiet = false)
             _state.value = LoadState.Ready(library)
+            runCatching { LibraryCache.write(library, cacheFile, url) }
         } catch (e: Exception) {
             _state.value = LoadState.Failed(e.message ?: e.toString())
         }
     }
 
-    private fun download(url: String, target: File) {
-        _state.value = LoadState.Loading("Laddar ner spellistan…")
+    private fun fetch(context: Context, url: String, acc: XtreamAccount?, force: Boolean, quiet: Boolean): Library {
+        val status: (String) -> Unit = { if (!quiet) _state.value = LoadState.Loading(it) }
+        return if (acc != null) {
+            Xtream.load(context.filesDir, acc, force, status)
+        } else {
+            val file = File(context.filesDir, "playlist.m3u")
+            if (force || !file.exists() || file.length() == 0L) download(url, file, quiet)
+            status("Läser spellistan…")
+            file.bufferedReader(Charsets.UTF_8).use { M3u.parse(it) }
+        }
+    }
+
+    private fun download(url: String, target: File, quiet: Boolean = false) {
+        if (!quiet) _state.value = LoadState.Loading("Laddar ner spellistan…")
         val tmp = File(target.parentFile, target.name + ".tmp")
         val conn = Net.open(url, readTimeoutMs = 120_000)
         try {
@@ -318,7 +355,7 @@ object Repo {
                         total += n
                         if (total - reported > 2_000_000) {
                             reported = total
-                            _state.value = LoadState.Loading("Laddar ner spellistan… ${total / 1_000_000} MB")
+                            if (!quiet) _state.value = LoadState.Loading("Laddar ner spellistan… ${total / 1_000_000} MB")
                         }
                     }
                 }
@@ -331,4 +368,66 @@ object Repo {
             tmp.delete()
         }
     }
+}
+
+
+/** Utgivningsår ur en titel som "Film (2019)" eller "Film 2019", utan regex (snabbt för stora listor). */
+fun yearOf(title: String): Int {
+    var i = title.length - 4
+    while (i >= 0) {
+        val c0 = title[i]
+        if ((c0 == '1' || c0 == '2') && i + 3 < title.length &&
+            title[i + 1].isDigit() && title[i + 2].isDigit() && title[i + 3].isDigit() &&
+            (i == 0 || !title[i - 1].isDigit()) && (i + 4 >= title.length || !title[i + 4].isDigit())
+        ) {
+            val y = title.substring(i, i + 4).toInt()
+            if (y in 1900..2100) return y
+        }
+        i--
+    }
+    return 0
+}
+
+/** Ser titeln ut att vara 4K/UHD? */
+fun is4k(title: String, group: String): Boolean {
+    fun has(s: String) = s.contains("4K", ignoreCase = true) || s.contains("UHD", ignoreCase = true) || s.contains("2160")
+    return has(title) || has(group)
+}
+
+/** Har titeln uppenbart svenskt tal eller svensk text (SE-kategori, "SVENSK" i namnet)? */
+fun isSwedish(title: String, group: String): Boolean {
+    val p = categoryPrefix(group)
+    return p == "SE" || p == "SV" || p == "SWE" || titlePrefix(title).let { it == "SE" || it == "SV" } ||
+        title.contains("svensk", ignoreCase = true)
+}
+
+/** Sorteringar i Filmer och Serier. */
+enum class Sort(val label: String) { NEWEST("Nyast"), AZ("A–Ö"), YEAR("År"), RATING("Betyg") }
+
+/** Titel utan språkprefix ("EN - War" -> "war"), för A–Ö. */
+private fun sortKey(title: String): String {
+    val p = titlePrefix(title) ?: return title.trim().lowercase()
+    val i = title.indexOfFirst { it == '-' || it == '|' || it == ':' || it == ']' || it == ')' }
+    return (if (i >= 0 && i < p.length + 6) title.substring(i + 1) else title).trim().lowercase()
+}
+
+fun Library.sortedFor(sort: Sort): Library {
+    if (sort == Sort.NEWEST && movies.values.none { l -> l.any { it.added > 0 } }) return this
+    val me: Comparator<Entry> = when (sort) {
+        Sort.NEWEST -> compareByDescending { it.added }
+        Sort.AZ -> compareBy { sortKey(it.title) }
+        Sort.YEAR -> compareByDescending<Entry> { it.year }.thenByDescending { it.added }
+        Sort.RATING -> compareByDescending<Entry> { it.rating }.thenByDescending { it.year }
+    }
+    val se: Comparator<Series> = when (sort) {
+        Sort.NEWEST -> compareByDescending { it.added }
+        Sort.AZ -> compareBy { sortKey(it.name) }
+        Sort.YEAR -> compareByDescending<Series> { it.year }.thenByDescending { it.added }
+        Sort.RATING -> compareByDescending<Series> { it.rating }.thenByDescending { it.year }
+    }
+    return Library(
+        movieGroups, movies.mapValues { it.value.sortedWith(me) },
+        seriesGroups, series.mapValues { it.value.sortedWith(se) },
+        adultGroups,
+    )
 }

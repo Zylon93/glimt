@@ -299,12 +299,31 @@ internal fun PosterCard(
     caption: String?,
     modifier: Modifier = Modifier,
     favorite: Boolean = false,
+    badges: List<String> = emptyList(),
     onClick: () -> Unit,
 ) {
     Column(modifier) {
         FocusBox(onClick = onClick, modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
             Box(Modifier.fillMaxSize()) {
                 Poster(logo, title, Modifier.fillMaxSize())
+                if (badges.isNotEmpty()) {
+                    Row(
+                        Modifier.align(Alignment.TopStart).padding(7.dp),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+                    ) {
+                        badges.forEach { b ->
+                            Text(
+                                b,
+                                color = if (b == "SV") OnAccent else Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .background(if (b == "SV") Accent else Color.Black.copy(alpha = 0.7f), RoundedCornerShape(5.dp))
+                                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
                 if (favorite) {
                     Icon(
                         Icons.Rounded.Favorite,
@@ -400,3 +419,15 @@ internal fun Modifier.dpadEscape(): Modifier {
         }
     }
 }
+
+
+/** Små märken på omslag: 4K och SV (svenskt tal eller svensk text enligt kategori/titel). */
+internal fun entryBadges(e: Entry): List<String> = listOfNotNull(
+    "4K".takeIf { is4k(e.title, e.group) },
+    "SV".takeIf { isSwedish(e.title, e.group) },
+)
+
+internal fun seriesBadges(s: Series): List<String> = listOfNotNull(
+    "4K".takeIf { is4k(s.name, s.group) },
+    "SV".takeIf { isSwedish(s.name, s.group) },
+)

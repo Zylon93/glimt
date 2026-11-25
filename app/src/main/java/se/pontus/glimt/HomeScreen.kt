@@ -88,10 +88,10 @@ internal fun HomeScreen(
                     SectionTitle("Favoriter")
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(end = 32.dp, top = 6.dp, bottom = 6.dp)) {
                         items(favSeries) { s ->
-                            PosterCard(s.name, s.logo, "Serie", Modifier.width(140.dp)) { onOpen(Detail.Show(s)) }
+                            PosterCard(s.name, s.logo, "Serie", Modifier.width(140.dp), badges = seriesBadges(s)) { onOpen(Detail.Show(s)) }
                         }
                         items(favMovies) { e ->
-                            PosterCard(e.title, e.logo, null, Modifier.width(140.dp)) { onOpen(Detail.Movie(e)) }
+                            PosterCard(e.title, e.logo, null, Modifier.width(140.dp), badges = entryBadges(e)) { onOpen(Detail.Movie(e)) }
                         }
                     }
                 }
@@ -103,7 +103,7 @@ internal fun HomeScreen(
                     SectionTitle("Nyligen tillagda serier")
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(end = 32.dp, top = 6.dp, bottom = 6.dp)) {
                         items(lib.newestSeries.take(40)) { s ->
-                            PosterCard(s.name, s.logo, null, Modifier.width(140.dp), favorite = favSeries.any { (it.xtreamId ?: it.name) == (s.xtreamId ?: s.name) }) {
+                            PosterCard(s.name, s.logo, null, Modifier.width(140.dp), badges = seriesBadges(s), favorite = favSeries.any { (it.xtreamId ?: it.name) == (s.xtreamId ?: s.name) }) {
                                 onOpen(Detail.Show(s))
                             }
                         }
@@ -116,7 +116,7 @@ internal fun HomeScreen(
                 SectionTitle("Nyligen tillagda filmer")
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(end = 32.dp, top = 6.dp, bottom = 6.dp)) {
                     items(lib.newestMovies.take(40)) { e ->
-                        PosterCard(e.title, e.logo, null, Modifier.width(140.dp), favorite = favMovies.any { it.url == e.url }) {
+                        PosterCard(e.title, e.logo, null, Modifier.width(140.dp), badges = entryBadges(e), favorite = favMovies.any { it.url == e.url }) {
                             onOpen(Detail.Movie(e))
                         }
                     }

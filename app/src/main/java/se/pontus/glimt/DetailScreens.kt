@@ -1,6 +1,10 @@
 package se.pontus.glimt
 
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,56 +81,142 @@ private fun Backdrop(url: String?) {
 // ---------------------------------------------------------------- Film
 
 @Composable
-internal fun MovieDetail(e: Entry, onPlay: (Entry, Boolean) -> Unit) {
+internal fun MovieDetail(e: Entry, onPlay: (Entry, Boolean) -> Unit, onOpen: (Detail) -> Unit) {
     val history by Store.history.collectAsState()
     val favorites by Store.favMovies.collectAsState()
+    val tmdbKey by Store.tmdbKey.collectAsState()
     val progress = history.firstOrNull { it.entry.url == e.url }
     val isFav = favorites.any { it.url == e.url }
+    val context = LocalContext.current
     val details by produceState<Details?>(null, e.url) {
         val acc = Repo.account
         val id = e.xtreamId
         if (acc != null && id != null) value = runCatching { Xtream.vodInfo(acc, id) }.getOrNull()
+    }
+    val extras by produceState<Tmdb.Extras?>(null, e.url, tmdbKey, details) {
+        value = runCatching { Tmdb.extras(tmdbKey, false, e.tmdb ?: details?.tmdbId, e.title) }.getOrNull()
+    }
+    val similar by produceState<List<Entry>>(emptyList(), e.url, extras) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { Current.similarMovies(e, extras?.recommendations.orEmpty()) }.getOrDefault(emptyList())
+        }
     }
     val playFocus = remember { FocusRequester() }
     LaunchedEffect(e.url) { runCatching { playFocus.requestFocus() } }
 
     Box(Modifier.fillMaxSize()) {
         Backdrop(details?.backdrop ?: e.logo)
-        Row(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 60.dp, bottom = 40.dp)) {
-            Poster(e.logo, e.title, Modifier.width(230.dp).height(345.dp).clip(RoundedCornerShape(18.dp)))
-            Spacer(Modifier.width(40.dp))
-            Column(Modifier.widthIn(max = 720.dp)) {
-                Text(displayTitle(e.title), color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold, lineHeight = 48.sp)
-                Spacer(Modifier.height(8.dp))
-                MetaLine(details)
-                Spacer(Modifier.height(4.dp))
-                Text(e.group, color = Muted, fontSize = 13.sp)
-                if (progress != null) {
-                    Spacer(Modifier.height(12.dp))
-                    ProgressBar(progress, Modifier.width(320.dp))
-                }
-                Spacer(Modifier.height(22.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    if (progress != null) {
-                        PillButton("Fortsätt · ${progress.minutesLeft} min kvar", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) {
-                            onPlay(e, true)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 48.dp, top = 60.dp, bottom = 48.dp)
+        ) {
+            Row(Modifier.padding(end = 48.dp)) {
+                Poster(e.logo, e.title, Modifier.width(230.dp).height(345.dp).clip(RoundedCornerShape(18.dp)))
+                Spacer(Modifier.width(40.dp))
+                Column(Modifier.widthIn(max = 760.dp)) {
+                    Text(displayTitle(e.title), color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold, lineHeight = 48.sp)
+                    Spacer(Modifier.height(8.dp))
+                    MetaLine(details)
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        entryBadges(e).forEach { b ->
+                            Text(
+                                b,
+                                color = if (b == "SV") OnAccent else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .background(if (b == "SV") Accent else Color.White.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 7.dp, vertical = 2.dp),
+                            )
                         }
-                        PillButton("Från början", primary = false, icon = Icons.Rounded.Replay) { onPlay(e, false) }
-                    } else {
-                        PillButton("Spela", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) { onPlay(e, false) }
+                        Text(e.group, color = Muted, fontSize = 13.sp)
                     }
-                    PillButton(if (isFav) "Favorit" else "Lägg till favorit", primary = false, icon = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder) { Store.toggleFavorite(e) }
                     if (progress != null) {
-                        PillButton("Ta bort från Fortsätt titta", primary = false, icon = Icons.Rounded.Close) { Store.removeProgress(e.url) }
+                        Spacer(Modifier.height(12.dp))
+                        ProgressBar(progress, Modifier.width(320.dp))
+                    }
+                    Spacer(Modifier.height(22.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        if (progress != null) {
+                            PillButton("Fortsätt · ${progress.minutesLeft} min kvar", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) {
+                                onPlay(e, true)
+                            }
+                            PillButton("Från början", primary = false, icon = Icons.Rounded.Replay) { onPlay(e, false) }
+                        } else {
+                            PillButton("Spela", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) { onPlay(e, false) }
+                        }
+                        extras?.trailerKey?.let { key -> PillButton("Trailer", primary = false, icon = Icons.Rounded.Movie) { openTrailer(context, key) } }
+                        PillButton(if (isFav) "Favorit" else "Lägg till favorit", primary = false, icon = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder) { Store.toggleFavorite(e) }
+                        if (progress != null) {
+                            PillButton("Ta bort", primary = false, icon = Icons.Rounded.Close) { Store.removeProgress(e.url) }
+                        }
+                    }
+                    val plot = details?.plot.orEmpty()
+                    if (plot.isNotBlank()) {
+                        Spacer(Modifier.height(24.dp))
+                        Text(plot, color = TextBright, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                val plot = details?.plot.orEmpty()
-                if (plot.isNotBlank()) {
-                    Spacer(Modifier.height(24.dp))
-                    Text(plot, color = TextBright, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
+            }
+            val cast = extras?.cast.orEmpty()
+            if (cast.isNotEmpty()) {
+                SectionTitle("Skådespelare")
+                CastRow(cast)
+            }
+            if (similar.isNotEmpty()) {
+                SectionTitle("Mer som detta")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(start = 4.dp, end = 48.dp, top = 6.dp, bottom = 6.dp)) {
+                    items(similar) { m ->
+                        PosterCard(m.title, m.logo, null, Modifier.width(140.dp), badges = entryBadges(m)) { onOpen(Detail.Movie(m)) }
+                    }
                 }
             }
         }
+    }
+}
+
+/** Rund bild och namn för varje skådespelare (från TMDB). */
+@Composable
+private fun CastRow(cast: List<Tmdb.Person>) {
+    val context = LocalContext.current
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(20.dp), contentPadding = PaddingValues(start = 4.dp, end = 48.dp)) {
+        items(cast) { p ->
+            Column(Modifier.width(104.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier.size(88.dp).clip(androidx.compose.foundation.shape.CircleShape).background(CardBg),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (p.photo != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context).data(p.photo).size(200, 200).build(),
+                            contentDescription = p.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Text(p.name.take(1), color = Muted, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(p.name, color = TextBright, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                if (p.role.isNotBlank()) Text(p.role, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Öppnar trailern i YouTube-appen. */
+internal fun openTrailer(context: android.content.Context, key: String) {
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=$key"))
+        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (e: android.content.ActivityNotFoundException) {
+        android.widget.Toast.makeText(context, "YouTube finns inte på TV:n", android.widget.Toast.LENGTH_LONG).show()
     }
 }
 
@@ -146,6 +236,11 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
     val isFav = favorites.any { (it.xtreamId ?: it.name) == (series.xtreamId ?: series.name) }
 
     var details by remember(series) { mutableStateOf<Details?>(null) }
+    val tmdbKey by Store.tmdbKey.collectAsState()
+    val context = LocalContext.current
+    val extras by produceState<Tmdb.Extras?>(null, series, tmdbKey, details) {
+        value = runCatching { Tmdb.extras(tmdbKey, true, series.tmdb ?: details?.tmdbId, series.name) }.getOrNull()
+    }
     var episodes by remember(series) { mutableStateOf(series.episodes) }
     var error by remember(series) { mutableStateOf<String?>(null) }
     LaunchedEffect(series) {
@@ -179,6 +274,11 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
             Text(displayTitle(series.name), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             MetaLine(details)
+            val castNames = extras?.cast.orEmpty().take(6).joinToString(", ") { it.name }
+            if (castNames.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text("Med: $castNames", color = Muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             val plot = details?.plot.orEmpty()
             if (plot.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))
@@ -199,6 +299,7 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
                         onPlay(episodes.first(), false)
                     }
                 }
+                extras?.trailerKey?.let { key -> PillButton("Trailer", primary = false, icon = Icons.Rounded.Movie) { openTrailer(context, key) } }
                 PillButton(if (isFav) "Favorit" else "Lägg till favorit", primary = false, icon = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder) { Store.toggleFavorite(series) }
                 if (last != null) {
                     PillButton("Ta bort från Fortsätt titta", primary = false, icon = Icons.Rounded.Close) {

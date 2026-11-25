@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -141,6 +142,14 @@ class PlayerActivity : ComponentActivity() {
     private var subOffset by mutableLongStateOf(0L)
     private var syncMode by mutableStateOf(false)
 
+    // ---- Spolning: vänster/höger samlar ihop en måltid och spolar när man släpper ----
+    private var scrubTarget by mutableStateOf<Long?>(null)
+    private var scrubJob: Job? = null
+
+    // ---- Nedräkning till nästa avsnitt ----
+    private var countdownCancelledFor by mutableStateOf<String?>(null)
+    private var countdownLeft by mutableStateOf(10)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -221,10 +230,16 @@ class PlayerActivity : ComponentActivity() {
             .setUri(e.url)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(e.title).build())
             .build()
+        // Ljudspråk och undertext som valts tidigare för samma serie
+        val seriesPref = Store.seriesPref(e)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setPreferredTextLanguage(prefs.subLang)
+            .setPreferredAudioLanguage(seriesPref?.audio)
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             .build()
+        countdownCancelledFor = null
+        scrubTarget = null
         val saved = if (resume) Store.progressFor(e.url) else null
         if (saved != null && saved.position > 30_000) {
             player.setMediaItem(baseItem, saved.position)
@@ -234,7 +249,7 @@ class PlayerActivity : ComponentActivity() {
         player.prepare()
         player.playWhenReady = true
 
-        if (prefs.autoSubs) startSearch(auto = true)
+        if (prefs.autoSubs && seriesPref?.subsOff != true) startSearch(auto = true)
         loadExtras()
     }
 
@@ -325,6 +340,36 @@ class PlayerActivity : ComponentActivity() {
         position = player.currentPosition
     }
 
+    /** Spolar i steg som blir större ju längre knappen hålls inne (10 s → 30 s → 60 s). */
+    private fun scrub(direction: Int, repeat: Int) {
+        val step = when {
+            repeat > 20 -> 60_000L
+            repeat > 6 -> 30_000L
+            else -> 10_000L
+        }
+        val d = duration
+        var t = (scrubTarget ?: player.currentPosition) + direction * step
+        t = t.coerceAtLeast(0L)
+        if (d > 0) t = t.coerceAtMost(d - 1000)
+        scrubTarget = t
+        scrubJob?.cancel()
+        scrubJob = lifecycleScope.launch {
+            delay(650)
+            player.seekTo(t)
+            position = t
+            scrubTarget = null
+        }
+    }
+
+    /** Visa nedräkning till nästa avsnitt: under eftertexterna, eller de sista 25 sekunderna. */
+    private fun countdownActive(): Boolean {
+        val next = nextEpisode() ?: return false
+        if (countdownCancelledFor == currentUrl || duration <= 0 || scrubTarget != null) return false
+        val credits = segments.firstOrNull { it.type == IntroDb.Type.CREDITS }
+        return if (credits != null) position >= credits.start && next.url.isNotEmpty()
+        else duration - position in 1..25_000
+    }
+
     private fun activeSegment(): IntroDb.Segment? {
         val pos = position
         return segments.firstOrNull { s ->
@@ -412,6 +457,17 @@ class PlayerActivity : ComponentActivity() {
         }
 
         val segment = activeSegment()
+        val countdown = countdownActive()
+        // Räkna ner 10 sekunder och starta sedan nästa avsnitt
+        LaunchedEffect(countdown, currentUrl) {
+            if (!countdown) return@LaunchedEffect
+            for (n in 10 downTo 1) {
+                countdownLeft = n
+                delay(1000)
+            }
+            nextEpisode()?.let { loadEntry(it, resume = false) }
+        }
+        BackHandler(enabled = countdown && !overlay) { countdownCancelledFor = currentUrl }
 
         Box(
             Modifier
@@ -437,11 +493,16 @@ class PlayerActivity : ComponentActivity() {
                         }
                         overlay -> false // vanlig fokusnavigering bland knapparna
                         ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter -> {
-                            if (segment != null) skip(segment) else overlay = true
+                            val next = nextEpisode()
+                            when {
+                                countdown && next != null -> loadEntry(next, resume = false)
+                                segment != null -> skip(segment)
+                                else -> overlay = true
+                            }
                             true
                         }
-                        ev.key == Key.DirectionLeft -> { seekBy(-10_000); overlay = true; true }
-                        ev.key == Key.DirectionRight -> { seekBy(10_000); overlay = true; true }
+                        ev.key == Key.DirectionLeft -> { scrub(-1, ev.nativeKeyEvent.repeatCount); overlay = true; true }
+                        ev.key == Key.DirectionRight -> { scrub(1, ev.nativeKeyEvent.repeatCount); overlay = true; true }
                         ev.key == Key.DirectionUp || ev.key == Key.DirectionDown -> { overlay = true; true }
                         else -> false
                     }
@@ -501,7 +562,9 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
             if (overlay && !syncMode) Controls(playFocus)
-            if (segment != null) {
+            if (countdown) {
+                NextEpisodeCard(Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = if (overlay) 210.dp else 60.dp))
+            } else if (segment != null) {
                 Box(Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = if (overlay) 210.dp else 60.dp)) {
                     PillButton(skipLabel(segment), primary = !overlay) { skip(segment) }
                 }
@@ -574,7 +637,8 @@ class PlayerActivity : ComponentActivity() {
     private fun SeekBar() {
         val source = remember { MutableInteractionSource() }
         val focused by source.collectIsFocusedAsState()
-        val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+        val shown = scrubTarget ?: position
+        val fraction = if (duration > 0) (shown.toFloat() / duration).coerceIn(0f, 1f) else 0f
         Box(
             Modifier
                 .fillMaxWidth()
@@ -582,8 +646,8 @@ class PlayerActivity : ComponentActivity() {
                 .onPreviewKeyEvent { ev ->
                     if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (ev.key) {
-                        Key.DirectionLeft -> { seekBy(-10_000); true }
-                        Key.DirectionRight -> { seekBy(10_000); true }
+                        Key.DirectionLeft -> { scrub(-1, ev.nativeKeyEvent.repeatCount); true }
+                        Key.DirectionRight -> { scrub(1, ev.nativeKeyEvent.repeatCount); true }
                         Key.DirectionCenter, Key.Enter -> { togglePlay(); true }
                         else -> false
                     }
@@ -611,7 +675,63 @@ class PlayerActivity : ComponentActivity() {
                         .size(if (focused) 20.dp else 14.dp)
                         .background(Color.White, CircleShape)
                 )
+                // Bubbla med tiden man spolar till
+                val target = scrubTarget
+                if (target != null) {
+                    val diff = (target - position) / 1000
+                    Text(
+                        fmt(target) + "  (" + (if (diff >= 0) "+" else "−") + fmt(kotlin.math.abs(diff) * 1000) + ")",
+                        color = OnAccent,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .offset(x = 40.dp, y = (-38).dp)
+                            .wrapContentWidth(unbounded = true)
+                            .background(Color.White, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                    )
+                }
             }
+        }
+    }
+
+    /** "Nästa avsnitt om 8 s" med förloppsring. OK = spela nu, Tillbaka = avbryt. */
+    @Composable
+    private fun NextEpisodeCard(modifier: Modifier) {
+        val next = nextEpisode() ?: return
+        Column(
+            modifier
+                .width(380.dp)
+                .background(Color.Black.copy(alpha = 0.82f), RoundedCornerShape(18.dp))
+                .padding(18.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        progress = { countdownLeft / 10f },
+                        color = Accent,
+                        trackColor = Color.White.copy(alpha = 0.2f),
+                        strokeWidth = 4.dp,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    Text("$countdownLeft", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text("Nästa avsnitt", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        (if (next.season > 0) "S%02d E%02d · ".format(next.season, next.episode) else "") + next.title,
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 2,
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("OK = spela nu   ·   Tillbaka = avbryt", color = TextBright, fontSize = 13.sp)
         }
     }
 
@@ -694,6 +814,7 @@ class PlayerActivity : ComponentActivity() {
                     player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
                         .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, i))
                         .build()
+                    Store.setSeriesAudio(entry, f.language) // kom ihåg för resten av serien
                 }
             }
         }
@@ -755,6 +876,7 @@ class PlayerActivity : ComponentActivity() {
                     0 -> {
                         setSubtitle(null)
                         activeIndex = -1
+                        Store.setSeriesSubsOff(entry, true) // av för resten av serien
                     }
                     1 -> {
                         results = emptyList()
@@ -780,6 +902,7 @@ class PlayerActivity : ComponentActivity() {
                     return@launch
                 }
                 setSubtitle(parsed)
+                Store.setSeriesSubsOff(entry, false)
                 activeIndex = index
                 toast("Undertext: ${r.label}")
             } catch (e: Exception) {

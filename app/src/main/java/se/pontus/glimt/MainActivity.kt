@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package se.pontus.glimt
 
 import android.app.Activity
@@ -71,6 +73,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -209,10 +213,14 @@ private fun App(prefs: Prefs) {
     ) {
         // Startsidans hero ligger under toppmenyn, övriga skärmar börjar nedanför den
         val heroUnderBar = detail == null && section == Section.HOME && state is LoadState.Ready
+        val contentFocus = remember { androidx.compose.ui.focus.FocusRequester() }
         Box(
             Modifier
                 .fillMaxSize()
                 .padding(top = if (heroUnderBar) 0.dp else TopBarHeight)
+                // Ner från toppmenyn går alltid hit, och tillbaka till det som senast hade fokus
+                .focusRequester(contentFocus)
+                .focusRestorer()
         ) {
             val d = detail
             when {
@@ -251,6 +259,7 @@ private fun App(prefs: Prefs) {
             }
         }
         TopBar(
+            contentFocus = contentFocus,
             current = section,
             onSelect = {
                 section = it
@@ -270,6 +279,7 @@ private val TopBarHeight = 92.dp
 /** Flikar överst: vald flik har en guldlinje, fokus ger vit fyllning. */
 @Composable
 private fun TopBar(
+    contentFocus: androidx.compose.ui.focus.FocusRequester,
     current: Section,
     onSelect: (Section) -> Unit,
     updateLabel: String?,
@@ -285,6 +295,7 @@ private fun TopBar(
         Modifier
             .fillMaxWidth()
             .height(TopBarHeight)
+            .focusProperties { down = contentFocus }
             // Mörkt överst så att innehåll som skrollar under menyn inte krockar med texten
             .background(Brush.verticalGradient(listOf(Bg.copy(alpha = 0.92f), Bg.copy(alpha = 0.6f), Color.Transparent)))
             .padding(start = 40.dp, end = 32.dp),

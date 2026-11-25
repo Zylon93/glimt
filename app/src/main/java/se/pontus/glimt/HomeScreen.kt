@@ -19,6 +19,17 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -70,16 +81,16 @@ internal fun HomeScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Tile("Filmer", "${num(lib.allMovies.size)} filmer", "▶", Color(0xFF2F5FD0), Color(0xFF5B8CFF), Modifier.weight(1f)) {
+                Tile("Filmer", "${num(lib.allMovies.size)} filmer", Icons.Rounded.Movie, Color(0xFF3A5BD9), Color(0xFF6E8BFF), Modifier.weight(1f)) {
                     onSection(Section.MOVIES)
                 }
-                Tile("Serier", "${num(lib.allSeries.size)} serier", "▤", Color(0xFF5B3FC8), Color(0xFF8F6BFF), Modifier.weight(1f)) {
+                Tile("Serier", "${num(lib.allSeries.size)} serier", Icons.Rounded.Tv, Color(0xFF6A3FD0), Color(0xFFA47BFF), Modifier.weight(1f)) {
                     onSection(Section.SERIES)
                 }
-                Tile("Favoriter", "${favMovies.size + favSeries.size} st", "♥", Color(0xFFC8303F), Color(0xFFFF5A6A), Modifier.weight(1f)) {
+                Tile("Favoriter", "${favMovies.size + favSeries.size} st", Icons.Rounded.Favorite, Color(0xFFD0304A), Color(0xFFFF6F7F), Modifier.weight(1f)) {
                     onSection(Section.FAVORITES)
                 }
-                Tile("Historik", "${history.size} påbörjade", "↺", Color(0xFF0E8C78), Color(0xFF1FC7A8), Modifier.weight(1f)) {
+                Tile("Historik", "${history.size} påbörjade", Icons.Rounded.History, Color(0xFF0E8C78), Color(0xFF2ED3B0), Modifier.weight(1f)) {
                     onSection(Section.HISTORY)
                 }
             }
@@ -176,11 +187,11 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
             Text(
                 displayTitle(e.title),
                 color = Color.White,
-                fontSize = 40.sp,
+                fontSize = 48.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 44.sp,
+                lineHeight = 52.sp,
             )
             Spacer(Modifier.height(8.dp))
             MetaLine(details)
@@ -191,8 +202,8 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
             }
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                PillButton("▶  Spela", primary = true, modifier = Modifier.focusRequester(playFocus)) { onPlay(e, true) }
-                PillButton("ⓘ  Mer info", primary = false) { onOpen(Detail.Movie(e)) }
+                PillButton("Spela", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) { onPlay(e, true) }
+                PillButton("Mer info", primary = false, icon = Icons.Rounded.Info) { onOpen(Detail.Movie(e)) }
             }
         }
         Row(
@@ -221,7 +232,14 @@ internal fun MetaLine(d: Details?) {
         if (parts.isNotEmpty()) Text(parts.joinToString("  ·  "), color = Muted, fontSize = 15.sp)
         if (d.rating != null) {
             if (parts.isNotEmpty()) Spacer(Modifier.width(14.dp))
-            Text("★ ${d.rating}", color = Color(0xFF5BD28A), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Row(
+                Modifier.background(Accent.copy(alpha = 0.16f), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Star, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(d.rating, color = Accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -230,13 +248,13 @@ internal fun MetaLine(d: Details?) {
 private fun Tile(
     title: String,
     subtitle: String,
-    icon: String,
+    icon: ImageVector,
     from: Color,
     to: Color,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
-    FocusBox(onClick = onClick, modifier = modifier.height(86.dp), shape = RoundedCornerShape(14.dp), scale = 1.05f) {
+    FocusBox(onClick = onClick, modifier = modifier.height(92.dp), shape = RoundedCornerShape(20.dp), scale = 1.05f) {
         Row(
             Modifier
                 .fillMaxSize()
@@ -244,14 +262,17 @@ private fun Tile(
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(icon, color = Color.White, fontSize = 26.sp)
+            Box(
+                Modifier.size(46.dp).background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp)) }
             Spacer(Modifier.width(14.dp))
             Column {
                 Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 Text(subtitle, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, maxLines = 1)
             }
             Spacer(Modifier.weight(1f))
-            Text("›", color = Color.White, fontSize = 28.sp)
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.9f))
         }
     }
 }

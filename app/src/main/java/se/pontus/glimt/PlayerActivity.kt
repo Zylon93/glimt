@@ -34,6 +34,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Audiotrack
+import androidx.compose.material.icons.rounded.Forward10
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Replay10
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -172,7 +182,7 @@ class PlayerActivity : ComponentActivity() {
         })
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Accent)) { PlayerScreen() }
+            GlimtTheme { PlayerScreen() }
         }
         loadEntry(first, intent.getBooleanExtra(EXTRA_RESUME, true))
     }
@@ -508,7 +518,7 @@ class PlayerActivity : ComponentActivity() {
             Box(Modifier.fillMaxWidth().height(300.dp).align(Alignment.BottomCenter).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)))))
 
             Column(Modifier.align(Alignment.TopStart).padding(start = 48.dp, top = 36.dp)) {
-                Text(title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                 subtitleLine?.let { Text(it, color = TextBright, fontSize = 16.sp) }
             }
             Row(Modifier.align(Alignment.TopEnd).padding(end = 48.dp, top = 40.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -536,22 +546,18 @@ class PlayerActivity : ComponentActivity() {
                 Text(fmt(position), color = Color.White, fontSize = 16.sp)
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (prev != null) RoundButton(onClick = { loadEntry(prev, resume = false) }) { c -> SkipIcon(c, forward = false) }
-                    RoundButton(onClick = { seekBy(-10_000) }) { c -> Text("−10", color = c, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
-                    RoundButton(size = 74.dp, focusRequester = playFocus, onClick = { togglePlay() }) { c ->
-                        if (playing) PauseIcon(c) else PlayIcon(c)
+                    if (prev != null) RoundButton(onClick = { loadEntry(prev, resume = false) }) { c -> Ic(Icons.Rounded.SkipPrevious, c) }
+                    RoundButton(onClick = { seekBy(-10_000) }) { c -> Ic(Icons.Rounded.Replay10, c) }
+                    RoundButton(size = 78.dp, focusRequester = playFocus, onClick = { togglePlay() }) { c ->
+                        Ic(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, c, 40.dp)
                     }
-                    RoundButton(onClick = { seekBy(10_000) }) { c -> Text("+10", color = c, fontSize = 15.sp, fontWeight = FontWeight.Bold) }
-                    if (next != null) RoundButton(onClick = { loadEntry(next, resume = false) }) { c -> SkipIcon(c, forward = true) }
+                    RoundButton(onClick = { seekBy(10_000) }) { c -> Ic(Icons.Rounded.Forward10, c) }
+                    if (next != null) RoundButton(onClick = { loadEntry(next, resume = false) }) { c -> Ic(Icons.Rounded.SkipNext, c) }
                     Spacer(Modifier.weight(1f))
                     Column(horizontalAlignment = Alignment.End) {
                         Row {
-                            RoundButton(onClick = { showSubtitleMenu() }) { c ->
-                                Text("CC", color = c, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            }
-                            RoundButton(onClick = { showAudioMenu() }) { c ->
-                                Text("♪", color = c, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                            }
+                            RoundButton(onClick = { showSubtitleMenu() }) { c -> Ic(Icons.Rounded.Subtitles, c) }
+                            RoundButton(onClick = { showAudioMenu() }) { c -> Ic(Icons.Rounded.Audiotrack, c) }
                         }
                         if (duration > 0) {
                             val ends = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis() + duration - position))
@@ -587,7 +593,7 @@ class PlayerActivity : ComponentActivity() {
         ) {
             val barHeight = if (focused) 8.dp else 5.dp
             Box(Modifier.fillMaxWidth().height(barHeight).background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(4.dp)))
-            Box(Modifier.fillMaxWidth(fraction).height(barHeight).background(Color(0xFF4CD08A), RoundedCornerShape(4.dp)))
+            Box(Modifier.fillMaxWidth(fraction).height(barHeight).background(AccentBrush, RoundedCornerShape(4.dp)))
             // Markera intro/eftertexter på tidslinjen
             if (duration > 0) {
                 Canvas(Modifier.fillMaxWidth().height(barHeight)) {
@@ -624,6 +630,10 @@ class PlayerActivity : ComponentActivity() {
             ) { content(if (focused) Color.Black else Color.White) }
         }
     }
+
+    @Composable
+    private fun Ic(icon: androidx.compose.ui.graphics.vector.ImageVector, c: Color, size: Dp = 28.dp) =
+        Icon(icon, contentDescription = null, tint = c, modifier = Modifier.size(size))
 
     @Composable
     private fun PlayIcon(c: Color) = Canvas(Modifier.size(26.dp).offset(x = 2.dp)) {

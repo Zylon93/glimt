@@ -19,6 +19,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -86,10 +92,10 @@ internal fun MovieDetail(e: Entry, onPlay: (Entry, Boolean) -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Backdrop(details?.backdrop ?: e.logo)
         Row(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 60.dp, bottom = 40.dp)) {
-            Poster(e.logo, e.title, Modifier.width(220.dp).height(330.dp).background(CardBg, RoundedCornerShape(12.dp)))
+            Poster(e.logo, e.title, Modifier.width(230.dp).height(345.dp).clip(RoundedCornerShape(18.dp)))
             Spacer(Modifier.width(40.dp))
             Column(Modifier.widthIn(max = 720.dp)) {
-                Text(displayTitle(e.title), color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold, lineHeight = 42.sp)
+                Text(displayTitle(e.title), color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold, lineHeight = 48.sp)
                 Spacer(Modifier.height(8.dp))
                 MetaLine(details)
                 Spacer(Modifier.height(4.dp))
@@ -101,14 +107,14 @@ internal fun MovieDetail(e: Entry, onPlay: (Entry, Boolean) -> Unit) {
                 Spacer(Modifier.height(22.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     if (progress != null) {
-                        PillButton("▶  Fortsätt (${progress.minutesLeft} min kvar)", primary = true, modifier = Modifier.focusRequester(playFocus)) {
+                        PillButton("Fortsätt · ${progress.minutesLeft} min kvar", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) {
                             onPlay(e, true)
                         }
-                        PillButton("↺  Från början", primary = false) { onPlay(e, false) }
+                        PillButton("Från början", primary = false, icon = Icons.Rounded.Replay) { onPlay(e, false) }
                     } else {
-                        PillButton("▶  Spela", primary = true, modifier = Modifier.focusRequester(playFocus)) { onPlay(e, false) }
+                        PillButton("Spela", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) { onPlay(e, false) }
                     }
-                    PillButton(if (isFav) "♥  Ta bort favorit" else "♡  Favorit", primary = false) { Store.toggleFavorite(e) }
+                    PillButton(if (isFav) "Favorit" else "Lägg till favorit", primary = false, icon = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder) { Store.toggleFavorite(e) }
                 }
                 val plot = details?.plot.orEmpty()
                 if (plot.isNotBlank()) {
@@ -166,7 +172,7 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Backdrop(details?.backdrop ?: series.logo)
         Column(Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 40.dp)) {
-            Text(displayTitle(series.name), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+            Text(displayTitle(series.name), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             MetaLine(details)
             val plot = details?.plot.orEmpty()
@@ -178,17 +184,18 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (last != null) {
                     PillButton(
-                        (if (last.upNext) "▶  Spela nästa: S%02d E%02d" else "▶  Fortsätt S%02d E%02d")
+                        (if (last.upNext) "Spela nästa: S%02d E%02d" else "Fortsätt S%02d E%02d")
                             .format(last.entry.season, last.entry.episode),
                         primary = true,
+                        icon = Icons.Rounded.PlayArrow,
                         modifier = Modifier.focusRequester(firstFocus),
                     ) { onPlay(last.entry, true) }
                 } else if (episodes.isNotEmpty()) {
-                    PillButton("▶  Spela första avsnittet", primary = true, modifier = Modifier.focusRequester(firstFocus)) {
+                    PillButton("Spela första avsnittet", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(firstFocus)) {
                         onPlay(episodes.first(), false)
                     }
                 }
-                PillButton(if (isFav) "♥  Ta bort favorit" else "♡  Favorit", primary = false) { Store.toggleFavorite(series) }
+                PillButton(if (isFav) "Favorit" else "Lägg till favorit", primary = false, icon = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder) { Store.toggleFavorite(series) }
             }
 
             val err = error

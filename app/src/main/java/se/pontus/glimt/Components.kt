@@ -17,7 +17,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -45,13 +57,6 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
-internal val Accent = Color(0xFF5CC8FF)
-internal val Bg = Color(0xFF0D1016)
-internal val SideBg = Color(0xFF12161D)
-internal val CardBg = Color(0xFF1C2230)
-internal val Muted = Color(0xFF8A93A3)
-internal val TextBright = Color(0xFFE8ECF2)
-
 /** Titel utan leverantörsprefix ("SE - ", "|EN|") och kvalitetstaggar. */
 internal fun displayTitle(raw: String): String = runCatching { Subtitles.clean(raw).first }.getOrDefault(raw)
 
@@ -60,8 +65,9 @@ internal fun displayTitle(raw: String): String = runCatching { Subtitles.clean(r
 internal fun FocusBox(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(10.dp),
+    shape: Shape = RoundedCornerShape(14.dp),
     scale: Float = 1.06f,
+    glow: Boolean = true,
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     val source = remember { MutableInteractionSource() }
@@ -73,38 +79,99 @@ internal fun FocusBox(
                 scaleX = s
                 scaleY = s
             }
+            .then(if (focused && glow) Modifier.shadow(22.dp, shape, ambientColor = Accent, spotColor = Accent) else Modifier)
             .clip(shape)
-            .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
+            .then(if (focused) Modifier.border(2.5.dp, Color.White, shape) else Modifier)
             .clickable(interactionSource = source, indication = null, onClick = onClick)
     ) { content(focused) }
 }
 
-/** Rundad knapp av den typ som finns i hero-bilden och på detaljsidorna. */
+/** Rundad knapp (Spela, Mer info, Favorit …). */
 @Composable
-internal fun PillButton(text: String, primary: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    FocusBox(onClick = onClick, modifier = modifier, shape = RoundedCornerShape(50), scale = 1.08f) { focused ->
-        Text(
-            text,
-            modifier = Modifier
-                .background(
+internal fun PillButton(
+    text: String,
+    primary: Boolean,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    onClick: () -> Unit,
+) {
+    FocusBox(onClick = onClick, modifier = modifier, shape = RoundedCornerShape(50), scale = 1.07f, glow = primary) { focused ->
+        val fg = if (focused || primary) OnAccent else Color.White
+        Row(
+            Modifier
+                .then(
                     when {
-                        focused -> Color.White
-                        primary -> Accent
-                        else -> Color.White.copy(alpha = 0.12f)
+                        focused -> Modifier.background(Color.White)
+                        primary -> Modifier.background(AccentBrush)
+                        else -> Modifier.background(Color.White.copy(alpha = 0.12f))
                     }
                 )
-                .padding(horizontal = 26.dp, vertical = 12.dp),
-            color = if (focused || primary) Color.Black else Color.White,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
+                .padding(start = if (icon != null) 20.dp else 26.dp, end = 26.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(text, color = fg, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+    }
+}
+
+/** Textfält i appens stil. Upp/ner flyttar fokus ut ur fältet. */
+@Composable
+internal fun GlimtTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String? = null,
+    placeholder: String = "",
+    leading: ImageVector? = null,
+) {
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    Column(modifier) {
+        if (label != null) {
+            Text(label, color = if (focused) Accent else Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            interactionSource = source,
+            cursorBrush = SolidColor(Accent),
+            textStyle = TextStyle(color = Color.White, fontSize = 17.sp, fontFamily = Outfit),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            modifier = Modifier.fillMaxWidth().dpadEscape(),
+            decorationBox = { inner ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(if (focused) CardBg else Surface1, RoundedCornerShape(14.dp))
+                        .border(if (focused) 2.dp else 1.dp, if (focused) Accent else Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (leading != null) {
+                        Icon(leading, contentDescription = null, tint = if (focused) Accent else Muted, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
+                    }
+                    Box(Modifier.weight(1f)) {
+                        if (value.isEmpty()) Text(placeholder, color = Muted, fontSize = 17.sp, maxLines = 1)
+                        inner()
+                    }
+                }
+            },
         )
     }
 }
 
 @Composable
 internal fun SectionTitle(text: String, hint: String? = null) {
-    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(start = 4.dp, top = 22.dp, bottom = 10.dp)) {
-        Text(text, color = TextBright, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, top = 26.dp, bottom = 12.dp)) {
+        Box(Modifier.width(4.dp).height(22.dp).background(AccentBrush, RoundedCornerShape(2.dp)))
+        Spacer(Modifier.width(10.dp))
+        Text(text, color = TextBright, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
         if (hint != null) {
             Spacer(Modifier.width(12.dp))
             Text(hint, color = Muted, fontSize = 13.sp)
@@ -144,22 +211,23 @@ internal fun PosterCard(
             Box(Modifier.fillMaxSize()) {
                 Poster(logo, title, Modifier.fillMaxSize())
                 if (favorite) {
-                    Text(
-                        "♥",
-                        color = Color(0xFFFF5A6A),
-                        fontSize = 18.sp,
+                    Icon(
+                        Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = Bad,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50))
+                            .padding(5.dp)
+                            .size(16.dp),
                     )
                 }
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = TextBright)
-        if (caption != null) Text(caption, fontSize = 11.sp, color = Muted, maxLines = 1)
+        Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = TextBright, fontWeight = FontWeight.Medium, lineHeight = 18.sp)
+        if (caption != null) Text(caption, fontSize = 12.sp, color = Muted, maxLines = 1)
     }
 }
 
@@ -176,11 +244,15 @@ internal fun ContinueCard(p: Progress, modifier: Modifier = Modifier, onClick: (
                         .fillMaxSize()
                         .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
                 )
-                Text(
-                    "▶",
-                    color = Color.White,
-                    fontSize = 26.sp,
-                    modifier = Modifier.align(Alignment.Center),
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(50))
+                        .padding(8.dp)
+                        .size(30.dp),
                 )
                 Box(
                     Modifier
@@ -189,7 +261,7 @@ internal fun ContinueCard(p: Progress, modifier: Modifier = Modifier, onClick: (
                         .height(5.dp)
                         .background(Color.White.copy(alpha = 0.25f))
                 ) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(p.fraction).background(Accent))
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(p.fraction).background(AccentBrush))
                 }
             }
         }

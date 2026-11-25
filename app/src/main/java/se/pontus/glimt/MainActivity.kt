@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -178,6 +179,9 @@ private fun App(prefs: Prefs) {
         }
     }
 
+    var railExpanded by remember { mutableStateOf(false) }
+    val railWidth by animateDpAsState(if (railExpanded) 250.dp else RailWidth, label = "rail")
+
     // Bakgrund med ett svagt guldskimmer uppe till vänster
     Box(
         Modifier
@@ -191,7 +195,13 @@ private fun App(prefs: Prefs) {
                 )
             )
     ) {
-        Box(Modifier.fillMaxSize().padding(start = RailWidth)) {
+        // Innehållet skjuts åt sidan när menyn fälls ut (flyttas bara, ritas inte om)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(start = RailWidth)
+                .offset { androidx.compose.ui.unit.IntOffset((railWidth - RailWidth).roundToPx(), 0) }
+        ) {
             val d = detail
             when {
                 d is Detail.Movie -> MovieDetail(d.entry, play)
@@ -228,6 +238,8 @@ private fun App(prefs: Prefs) {
             }
         }
         Sidebar(
+            width = railWidth,
+            onExpandedChange = { railExpanded = it },
             current = section,
             onSelect = {
                 section = it
@@ -246,9 +258,16 @@ private val RailWidth = 88.dp
 
 /** Smal ikonmeny som fälls ut med text när den får fokus (som på Google TV). */
 @Composable
-private fun Sidebar(current: Section, onSelect: (Section) -> Unit, updateLabel: String?, onUpdate: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    val width by animateDpAsState(if (expanded) 260.dp else RailWidth, label = "rail")
+private fun Sidebar(
+    width: androidx.compose.ui.unit.Dp,
+    onExpandedChange: (Boolean) -> Unit,
+    current: Section,
+    onSelect: (Section) -> Unit,
+    updateLabel: String?,
+    onUpdate: () -> Unit,
+) {
+    // Texterna visas först när menyn är nästan helt utfälld, så att de inte kläms ihop
+    val expanded = width > 200.dp
     Column(
         Modifier
             .width(width)
@@ -257,7 +276,7 @@ private fun Sidebar(current: Section, onSelect: (Section) -> Unit, updateLabel: 
                 if (expanded) Brush.horizontalGradient(listOf(SideBg, SideBg.copy(alpha = 0.97f)))
                 else Brush.horizontalGradient(listOf(SideBg, SideBg))
             )
-            .onFocusChanged { expanded = it.hasFocus }
+            .onFocusChanged { onExpandedChange(it.hasFocus) }
             .padding(horizontal = 14.dp, vertical = 26.dp)
     ) {
         // Logga

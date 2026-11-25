@@ -4,6 +4,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -45,8 +49,23 @@ private fun Typography.withFont(f: FontFamily): Typography {
     )
 }
 
+/**
+ * Gränssnittet ritas som om skärmen vore 1400 dp bred, oavsett TV:ns egen inställning.
+ * Android TV räknar normalt med 960 dp på en 1080p-skärm, vilket gör allt väldigt stort.
+ */
+private const val DESIGN_WIDTH_DP = 1400f
+
 @Composable
 internal fun GlimtTheme(content: @Composable () -> Unit) {
+    val metrics = LocalContext.current.resources.displayMetrics
+    val density = Density(metrics.widthPixels / DESIGN_WIDTH_DP, fontScale = 1f)
+    CompositionLocalProvider(LocalDensity provides density) {
+        GlimtMaterial(content)
+    }
+}
+
+@Composable
+private fun GlimtMaterial(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Accent,

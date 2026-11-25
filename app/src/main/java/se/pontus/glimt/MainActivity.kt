@@ -29,10 +29,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -190,14 +188,11 @@ private fun App(prefs: Prefs) {
             val msg = when {
                 result.isFailure -> "Kunde inte kolla efter uppdatering: ${result.exceptionOrNull()?.message}"
                 update == null -> "Du har senaste versionen (${Updater.currentVersion})"
-                else -> "Ny version ${update?.versionName} finns – knappen ligger längst ner i menyn"
+                else -> "Ny version ${update?.versionName} finns – knappen ligger uppe i menyn"
             }
             Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
         }
     }
-
-    var railExpanded by remember { mutableStateOf(false) }
-    val railWidth by animateDpAsState(if (railExpanded) 250.dp else RailWidth, label = "rail")
 
     // Bakgrund med ett svagt guldskimmer uppe till vänster
     Box(
@@ -212,12 +207,12 @@ private fun App(prefs: Prefs) {
                 )
             )
     ) {
-        // Innehållet skjuts åt sidan när menyn fälls ut (flyttas bara, ritas inte om)
+        // Startsidans hero ligger under toppmenyn, övriga skärmar börjar nedanför den
+        val heroUnderBar = detail == null && section == Section.HOME && state is LoadState.Ready
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(start = RailWidth)
-                .offset { androidx.compose.ui.unit.IntOffset((railWidth - RailWidth).roundToPx(), 0) }
+                .padding(top = if (heroUnderBar) 0.dp else TopBarHeight)
         ) {
             val d = detail
             when {
@@ -255,9 +250,7 @@ private fun App(prefs: Prefs) {
                 }
             }
         }
-        Sidebar(
-            width = railWidth,
-            onExpandedChange = { railExpanded = it },
+        TopBar(
             current = section,
             onSelect = {
                 section = it
@@ -270,107 +263,114 @@ private fun App(prefs: Prefs) {
     }
 }
 
-private val RailWidth = 88.dp
+private val TopBarHeight = 92.dp
 
 // ---------------------------------------------------------------- Meny
 
-/** Smal ikonmeny som fälls ut med text när den får fokus (som på Google TV). */
+/** Flikar överst: vald flik har en guldlinje, fokus ger vit fyllning. */
 @Composable
-private fun Sidebar(
-    width: androidx.compose.ui.unit.Dp,
-    onExpandedChange: (Boolean) -> Unit,
+private fun TopBar(
     current: Section,
     onSelect: (Section) -> Unit,
     updateLabel: String?,
     onUpdate: () -> Unit,
 ) {
-    // Texterna visas först när menyn är nästan helt utfälld, så att de inte kläms ihop
-    val expanded = width > 200.dp
-    Column(
-        Modifier
-            .width(width)
-            .fillMaxHeight()
-            .background(
-                if (expanded) Brush.horizontalGradient(listOf(SideBg, SideBg.copy(alpha = 0.97f)))
-                else Brush.horizontalGradient(listOf(SideBg, SideBg))
-            )
-            .onFocusChanged { onExpandedChange(it.hasFocus) }
-            .padding(horizontal = 14.dp, vertical = 26.dp)
-    ) {
-        // Logga
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, bottom = 34.dp)) {
-            Box(
-                Modifier.size(52.dp).background(AccentBrush, RoundedCornerShape(16.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("G", color = OnAccent, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            }
-            if (expanded) {
-                Spacer(Modifier.width(14.dp))
-                Text("Glimt", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
+    val clock by androidx.compose.runtime.produceState(now()) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000L - System.currentTimeMillis() % 60_000L)
+            value = now()
         }
-        Section.entries.forEach { s ->
-            val selected = s == current
-            FocusBox(
-                onClick = { onSelect(s) },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                scale = 1.04f,
-                glow = false,
-            ) { focused ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .then(
-                            when {
-                                focused -> Modifier.background(Color.White)
-                                selected -> Modifier.background(Color.White.copy(alpha = 0.10f))
-                                else -> Modifier
-                            }
-                        )
-                        .padding(horizontal = 16.dp, vertical = 13.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        s.icon,
-                        contentDescription = s.label,
-                        tint = when {
-                            focused -> OnAccent
-                            selected -> Accent
-                            else -> Muted
-                        },
-                        modifier = Modifier.size(26.dp),
-                    )
-                    if (expanded) {
-                        Spacer(Modifier.width(16.dp))
-                        Text(
-                            s.label,
-                            color = if (focused) OnAccent else if (selected) Color.White else TextBright,
-                            fontSize = 18.sp,
-                            fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(TopBarHeight)
+            // Mörkt överst så att innehåll som skrollar under menyn inte krockar med texten
+            .background(Brush.verticalGradient(listOf(Bg.copy(alpha = 0.92f), Bg.copy(alpha = 0.6f), Color.Transparent)))
+            .padding(start = 40.dp, end = 32.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("Glimt", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(".", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(36.dp))
+        Section.entries.filter { it != Section.SETTINGS }.forEach { s ->
+            TopTab(s.label, selected = s == current) { onSelect(s) }
+            Spacer(Modifier.width(6.dp))
         }
         Spacer(Modifier.weight(1f))
         if (updateLabel != null) {
-            FocusBox(onClick = onUpdate, modifier = Modifier.fillMaxWidth(), glow = false) {
+            FocusBox(onClick = onUpdate, shape = RoundedCornerShape(50), scale = 1.05f, glow = false) {
                 Row(
-                    Modifier.fillMaxWidth().background(AccentBrush).padding(horizontal = 16.dp, vertical = 13.dp),
+                    Modifier.background(AccentBrush).padding(horizontal = 16.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.SystemUpdate, contentDescription = updateLabel, tint = OnAccent, modifier = Modifier.size(26.dp))
-                    if (expanded) {
-                        Spacer(Modifier.width(14.dp))
-                        Text(updateLabel, color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                    }
+                    Icon(Icons.Rounded.SystemUpdate, contentDescription = null, tint = OnAccent, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(updateLabel, color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 }
+            }
+            Spacer(Modifier.width(18.dp))
+        }
+        Text(clock, color = Muted, fontSize = 17.sp)
+        Spacer(Modifier.width(14.dp))
+        val settingsSelected = current == Section.SETTINGS
+        FocusBox(onClick = { onSelect(Section.SETTINGS) }, shape = RoundedCornerShape(50), scale = 1.08f, glow = false) { focused ->
+            Box(
+                Modifier
+                    .size(46.dp)
+                    .background(if (focused) Color.White else if (settingsSelected) Color.White.copy(alpha = 0.12f) else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Settings,
+                    contentDescription = Section.SETTINGS.label,
+                    tint = when {
+                        focused -> OnAccent
+                        settingsSelected -> Accent
+                        else -> Muted
+                    },
+                    modifier = Modifier.size(26.dp),
+                )
             }
         }
     }
 }
+
+@Composable
+private fun TopTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    FocusBox(onClick = onClick, shape = RoundedCornerShape(50), scale = 1.05f, glow = false) { focused ->
+        Column(
+            Modifier
+                .then(if (focused) Modifier.background(Color.White) else Modifier)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                label,
+                color = when {
+                    focused -> OnAccent
+                    selected -> Color.White
+                    else -> Muted
+                },
+                fontSize = 18.sp,
+                fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(4.dp))
+            Box(
+                Modifier
+                    .width(22.dp)
+                    .height(3.dp)
+                    .background(if (selected && !focused) Accent else Color.Transparent, RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
+
+private fun now(): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale("sv", "SE")).format(java.util.Date())
 
 // ---------------------------------------------------------------- Filmer / Serier
 

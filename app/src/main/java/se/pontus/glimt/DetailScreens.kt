@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -115,6 +116,9 @@ internal fun MovieDetail(e: Entry, onPlay: (Entry, Boolean) -> Unit) {
                         PillButton("Spela", primary = true, icon = Icons.Rounded.PlayArrow, modifier = Modifier.focusRequester(playFocus)) { onPlay(e, false) }
                     }
                     PillButton(if (isFav) "Favorit" else "Lägg till favorit", primary = false, icon = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder) { Store.toggleFavorite(e) }
+                    if (progress != null) {
+                        PillButton("Ta bort från Fortsätt titta", primary = false, icon = Icons.Rounded.Close) { Store.removeProgress(e.url) }
+                    }
                 }
                 val plot = details?.plot.orEmpty()
                 if (plot.isNotBlank()) {
@@ -196,6 +200,11 @@ internal fun SeriesDetail(series: Series, onPlay: (Entry, Boolean) -> Unit) {
                     }
                 }
                 PillButton(if (isFav) "Favorit" else "Lägg till favorit", primary = false, icon = if (isFav) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder) { Store.toggleFavorite(series) }
+                if (last != null) {
+                    PillButton("Ta bort från Fortsätt titta", primary = false, icon = Icons.Rounded.Close) {
+                        Store.removeSeries(series.name, series.xtreamId)
+                    }
+                }
             }
 
             val err = error

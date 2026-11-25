@@ -107,6 +107,20 @@ object Store {
         writeHistory()
     }
 
+    /** Tar bort alla avsnitt av en serie från "Fortsätt titta". */
+    fun removeSeries(seriesName: String, xtreamId: String?) {
+        _history.value = _history.value.filterNot {
+            it.entry.kind == Kind.EPISODE && it.entry.series == seriesName && it.entry.xtreamId == xtreamId
+        }
+        writeHistory()
+    }
+
+    /** Tar bort en post från "Fortsätt titta" (hela serien om det är ett avsnitt). */
+    fun remove(p: Progress) {
+        val s = p.entry.series
+        if (p.entry.kind == Kind.EPISODE && s != null) removeSeries(s, p.entry.xtreamId) else removeProgress(p.entry.url)
+    }
+
     fun removeProgress(url: String) {
         _history.value = _history.value.filterNot { it.entry.url == url }
         writeHistory()

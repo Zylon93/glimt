@@ -535,7 +535,7 @@ private fun FavoritesScreen(onOpen: (Detail) -> Unit) {
 private fun HistoryScreen(onPlay: (Entry, Boolean) -> Unit) {
     val history by Store.history.collectAsState()
     Column(Modifier.fillMaxSize().padding(start = 28.dp, top = 12.dp)) {
-        SectionTitle("Fortsätt titta", "Färdigsedda titlar försvinner automatiskt")
+        SectionTitle("Fortsätt titta", "Håll in OK för att ta bort · färdigsedda försvinner automatiskt")
         Grid(history, emptyText = "Du har inte börjat titta på något än.", minWidth = 250) { p ->
             ContinueCard(p) { onPlay(p.entry, true) }
         }

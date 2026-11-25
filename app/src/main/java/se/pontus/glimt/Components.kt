@@ -68,10 +68,31 @@ internal fun FocusBox(
     shape: Shape = RoundedCornerShape(14.dp),
     scale: Float = 1.06f,
     glow: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
+    val longFired = remember { booleanArrayOf(false) }
+    // Håll inne OK: fjärrkontrollen skickar upprepade tryck, då körs onLongClick i stället för onClick
+    val longPress = if (onLongClick == null) Modifier else Modifier.onPreviewKeyEvent { e ->
+        val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+        when {
+            !ok -> false
+            e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount > 0 -> {
+                if (!longFired[0]) {
+                    longFired[0] = true
+                    onLongClick()
+                }
+                true
+            }
+            e.type == KeyEventType.KeyUp && longFired[0] -> {
+                longFired[0] = false
+                true
+            }
+            else -> false
+        }
+    }
     Box(
         modifier
             .graphicsLayer {
@@ -82,6 +103,7 @@ internal fun FocusBox(
             .then(if (focused && glow) Modifier.shadow(22.dp, shape, ambientColor = Accent, spotColor = Accent) else Modifier)
             .clip(shape)
             .then(if (focused) Modifier.border(2.5.dp, Color.White, shape) else Modifier)
+            .then(longPress)
             .clickable(interactionSource = source, indication = null, onClick = onClick)
     ) { content(focused) }
 }
@@ -235,8 +257,16 @@ internal fun PosterCard(
 @Composable
 internal fun ContinueCard(p: Progress, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val e = p.entry
+    val context = LocalContext.current
     Column(modifier) {
-        FocusBox(onClick = onClick, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+        FocusBox(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+            onLongClick = {
+                Store.remove(p)
+                android.widget.Toast.makeText(context, "Togs bort från Fortsätt titta", android.widget.Toast.LENGTH_SHORT).show()
+            },
+        ) {
             Box(Modifier.fillMaxSize()) {
                 Poster(e.logo, e.title, Modifier.fillMaxSize())
                 Box(

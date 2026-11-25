@@ -74,7 +74,8 @@ object Xtream {
             val group = serCats[o["category_id"]] ?: "Övrigt"
             val name = o["name"].orEmpty().ifBlank { "Okänd serie" }
             val logo = o["cover"]?.takeIf { it.startsWith("http") }
-            series.getOrPut(group) { ArrayList() }.add(Series(name, group, logo, emptyList(), xtreamId = id))
+            val added = (o["last_modified"] ?: o["added"])?.toLongOrNull() ?: 0L
+            series.getOrPut(group) { ArrayList() }.add(Series(name, group, logo, emptyList(), xtreamId = id, added = added))
         }
         series.entries.removeAll { it.value.isEmpty() }
 

@@ -32,6 +32,8 @@ data class Series(
     val episodes: List<Entry>,
     /** Satt för Xtream-serier; avsnitten hämtas då när serien öppnas. */
     val xtreamId: String? = null,
+    /** Senast uppdaterad hos leverantören (unix-sekunder), 0 om okänt. */
+    val added: Long = 0,
 )
 
 class Library(
@@ -47,6 +49,12 @@ class Library(
     val newestMovies: List<Entry> by lazy {
         if (allMovies.any { it.added > 0 }) allMovies.sortedByDescending { it.added }.take(60)
         else allMovies.takeLast(60).reversed()
+    }
+
+    /** Senast tillagda/uppdaterade serier först. */
+    val newestSeries: List<Series> by lazy {
+        if (allSeries.any { it.added > 0 }) allSeries.sortedByDescending { it.added }.take(60)
+        else allSeries.takeLast(60).reversed()
     }
 }
 

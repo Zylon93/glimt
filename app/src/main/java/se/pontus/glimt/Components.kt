@@ -19,6 +19,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -140,7 +148,10 @@ internal fun PillButton(
     }
 }
 
-/** Textfält i appens stil. Upp/ner flyttar fokus ut ur fältet. */
+/**
+ * Textfält i appens stil. På TV öppnas tangentbordet först när man trycker OK på fältet,
+ * inte bara för att man passerar det med fjärrkontrollen. Klar/Tillbaka/upp/ner lämnar fältet.
+ */
 @Composable
 internal fun GlimtTextField(
     value: String,
@@ -149,42 +160,104 @@ internal fun GlimtTextField(
     label: String? = null,
     placeholder: String = "",
     leading: ImageVector? = null,
+    focusRequester: FocusRequester? = null,
 ) {
+    var editing by remember { mutableStateOf(false) }
+    var returnFocus by remember { mutableStateOf(false) }
+    val boxFocus = focusRequester ?: remember { FocusRequester() }
+    val fieldFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
     val source = remember { MutableInteractionSource() }
-    val focused by source.collectIsFocusedAsState()
+    val boxFocused by source.collectIsFocusedAsState()
+    val active = editing || boxFocused
+
+    @Composable
+    fun Decor(inner: @Composable () -> Unit) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(if (active) CardBg else Surface1, RoundedCornerShape(14.dp))
+                .border(
+                    if (active) 2.dp else 1.dp,
+                    when {
+                        editing -> Accent
+                        boxFocused -> Color.White
+                        else -> Color.White.copy(alpha = 0.08f)
+                    },
+                    RoundedCornerShape(14.dp),
+                )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (leading != null) {
+                Icon(leading, contentDescription = null, tint = if (active) Accent else Muted, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(12.dp))
+            }
+            Box(Modifier.weight(1f)) {
+                if (value.isEmpty()) Text(placeholder, color = Muted, fontSize = 17.sp, maxLines = 1)
+                inner()
+            }
+            if (boxFocused && !editing) {
+                Text("OK = skriv", color = Muted, fontSize = 13.sp)
+            }
+        }
+    }
+
     Column(modifier) {
         if (label != null) {
-            Text(label, color = if (focused) Accent else Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+            Text(label, color = if (active) Accent else Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
         }
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            interactionSource = source,
-            cursorBrush = SolidColor(Accent),
-            textStyle = TextStyle(color = Color.White, fontSize = 17.sp, fontFamily = Outfit),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            modifier = Modifier.fillMaxWidth().dpadEscape(),
-            decorationBox = { inner ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(if (focused) CardBg else Surface1, RoundedCornerShape(14.dp))
-                        .border(if (focused) 2.dp else 1.dp, if (focused) Accent else Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (leading != null) {
-                        Icon(leading, contentDescription = null, tint = if (focused) Accent else Muted, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(12.dp))
+        if (editing) {
+            var hadFocus by remember { mutableStateOf(false) }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                cursorBrush = SolidColor(Accent),
+                textStyle = TextStyle(color = Color.White, fontSize = 17.sp, fontFamily = Outfit),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    keyboard?.hide()
+                    returnFocus = true
+                    editing = false
+                }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(fieldFocus)
+                    .onFocusChanged { f ->
+                        if (f.isFocused) hadFocus = true
+                        else if (hadFocus) editing = false
                     }
-                    Box(Modifier.weight(1f)) {
-                        if (value.isEmpty()) Text(placeholder, color = Muted, fontSize = 17.sp, maxLines = 1)
-                        inner()
+                    .onPreviewKeyEvent { e ->
+                        if (e.key == Key.Back && e.type == KeyEventType.KeyUp) {
+                            returnFocus = true
+                            editing = false
+                            true
+                        } else false
                     }
+                    .dpadEscape(),
+                decorationBox = { inner -> Decor(inner) },
+            )
+            LaunchedEffect(Unit) {
+                runCatching { fieldFocus.requestFocus() }
+                keyboard?.show()
+            }
+        } else {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .focusRequester(boxFocus)
+                    .clickable(interactionSource = source, indication = null) { editing = true }
+            ) {
+                Decor { Text(value, color = Color.White, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            LaunchedEffect(returnFocus) {
+                if (returnFocus) {
+                    returnFocus = false
+                    runCatching { boxFocus.requestFocus() }
                 }
-            },
-        )
+            }
+        }
     }
 }
 

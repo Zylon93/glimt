@@ -555,7 +555,8 @@ private fun SearchScreen(lib: Library, onOpen: (Detail) -> Unit) {
             onValueChange = { query = it },
             placeholder = "Sök film eller serie…",
             leading = Icons.Rounded.Search,
-            modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth().focusRequester(fieldFocus),
+            modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
+            focusRequester = fieldFocus,
         )
         Spacer(Modifier.height(8.dp))
         val (movieCount, seriesCount) = counts

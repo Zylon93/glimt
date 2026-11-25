@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun HomeScreen(
@@ -63,12 +64,22 @@ internal fun HomeScreen(
     val favSeries by Store.favSeries.collectAsState()
     val featured = remember(lib) { lib.newestMovies.filter { it.logo != null }.take(8) }
 
+    // När heron får fokus rullas listan alltid hela vägen upp, så att titeln inte hamnar under menyn
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 40.dp),
     ) {
         if (featured.isNotEmpty()) {
-            item { Hero(featured, onPlay, onOpen) }
+            item {
+                Hero(featured, onPlay, onOpen) {
+                    if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+                        scope.launch { listState.animateScrollToItem(0) }
+                    }
+                }
+            }
         }
         if (history.isNotEmpty()) {
             item {
@@ -128,7 +139,7 @@ internal fun HomeScreen(
 
 /** Stor bild överst som byter film var nionde sekund. */
 @Composable
-private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen: (Detail) -> Unit) {
+private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen: (Detail) -> Unit, onFocused: () -> Unit) {
     var index by remember { mutableIntStateOf(0) }
     var focusedInside by remember { mutableStateOf(false) }
     val playFocus = remember { FocusRequester() }
@@ -174,7 +185,10 @@ private fun Hero(featured: List<Entry>, onPlay: (Entry, Boolean) -> Unit, onOpen
                 .align(Alignment.TopStart)
                 .padding(start = 40.dp, top = 120.dp)
                 .widthIn(max = 620.dp)
-                .onFocusChanged { focusedInside = it.hasFocus },
+                .onFocusChanged {
+                    focusedInside = it.hasFocus
+                    if (it.hasFocus) onFocused()
+                },
         ) {
             Text(
                 "NYTT I BIBLIOTEKET",

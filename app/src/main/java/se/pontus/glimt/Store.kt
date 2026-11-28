@@ -8,7 +8,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Hur långt man har kommit i en film eller ett avsnitt. */
-data class Progress(val entry: Entry, val position: Long, val duration: Long, val updated: Long) {
+data class Progress(
+    val entry: Entry,
+    val position: Long,
+    val duration: Long,
+    val updated: Long,
+    /** Ett nytt avsnitt som kommit ut sedan man såg ikapp serien. */
+    val isNew: Boolean = false,
+) {
     val fraction: Float get() = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
     val minutesLeft: Long get() = if (duration > 0) ((duration - position) / 60_000).coerceAtLeast(1) else 0
     /** Nästa avsnitt i en serie man just sett klart (inte påbörjat än). */
@@ -117,8 +124,9 @@ object Store {
         _favMovies.value = readArray("fav_movies") { entryFromJson(it) }
         _favSeries.value = readArray("fav_series") { seriesFromJson(it) }
         _history.value = readArray("history") { o ->
-            Progress(entryFromJson(o.getJSONObject("entry")), o.optLong("pos"), o.optLong("dur"), o.optLong("t"))
+            Progress(entryFromJson(o.getJSONObject("entry")), o.optLong("pos"), o.optLong("dur"), o.optLong("t"), o.optBoolean("new", false))
         }
+        _following.value = readArray("following") { o -> Follow(entryFromJson(o.getJSONObject("entry")), o.optLong("t")) }
     }
 
     // ---------- Favoritkanaler (live-TV) ----------
@@ -186,6 +194,11 @@ object Store {
             else -> (listOf(Progress(e, position, duration, now)) + rest).take(MAX_HISTORY)
         }
         writeHistory()
+        // Sett sista avsnittet som finns: vänta på nästa, så att serien kommer tillbaka när det släpps
+        if (e.kind == Kind.EPISODE && e.series != null) {
+            val others = _following.value.filterNot { sameSeries(it.lastEpisode, e) }
+            setFollowing(if (finished && next == null) (listOf(Follow(e, now)) + others).take(60) else others)
+        }
     }
 
     /** Tar bort alla avsnitt av en serie från "Fortsätt titta". */
@@ -194,6 +207,8 @@ object Store {
             it.entry.kind == Kind.EPISODE && it.entry.series == seriesName && it.entry.xtreamId == xtreamId
         }
         writeHistory()
+        // Bortplockad av användaren: sluta också vänta på nya avsnitt
+        setFollowing(_following.value.filterNot { it.lastEpisode.series == seriesName && it.lastEpisode.xtreamId == xtreamId })
     }
 
     /** Tar bort en post från "Fortsätt titta" (hela serien om det är ett avsnitt). */
@@ -209,6 +224,30 @@ object Store {
 
     private fun writeHistory() = writeArray("history", _history.value) { p ->
         JSONObject().put("entry", entryToJson(p.entry)).put("pos", p.position).put("dur", p.duration).put("t", p.updated)
+            .put("new", p.isNew)
+    }
+
+    // ---------- Serier man sett ikapp (väntar på nästa avsnitt) ----------
+
+    /** Senaste avsnittet man sett av en serie där det inte fanns något nästa avsnitt än. */
+    data class Follow(val lastEpisode: Entry, val updated: Long)
+
+    private val _following = MutableStateFlow<List<Follow>>(emptyList())
+    val following: StateFlow<List<Follow>> = _following
+
+    private fun sameSeries(a: Entry, b: Entry) = a.series == b.series && a.xtreamId == b.xtreamId
+
+    private fun setFollowing(list: List<Follow>) {
+        _following.value = list
+        writeArray("following", list) { f -> JSONObject().put("entry", entryToJson(f.lastEpisode)).put("t", f.updated) }
+    }
+
+    /** Ett nytt avsnitt har kommit ut: lägg det först under Fortsätt titta och sluta vänta. */
+    fun newEpisodeFound(f: Follow, next: Entry) {
+        setFollowing(_following.value.filterNot { sameSeries(it.lastEpisode, f.lastEpisode) })
+        val rest = _history.value.filterNot { it.entry.kind == Kind.EPISODE && sameSeries(it.entry, next) }
+        _history.value = (listOf(Progress(next, 0, 0, System.currentTimeMillis(), isNew = true)) + rest).take(MAX_HISTORY)
+        writeHistory()
     }
 
     // ---------- JSON ----------

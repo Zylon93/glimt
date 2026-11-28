@@ -129,9 +129,9 @@ object Xtream {
     private val seriesCache = HashMap<String, Pair<Details?, List<Entry>>>()
 
     /** Seriens info och alla avsnitt. Cachas i minnet. */
-    suspend fun seriesInfo(acc: XtreamAccount, s: Series): Pair<Details?, List<Entry>> {
+    suspend fun seriesInfo(acc: XtreamAccount, s: Series, fresh: Boolean = false): Pair<Details?, List<Entry>> {
         val id = s.xtreamId ?: return null to emptyList()
-        synchronized(seriesCache) { seriesCache[id] }?.let { return it }
+        if (!fresh) synchronized(seriesCache) { seriesCache[id] }?.let { return it }
         return fetchSeriesInfo(acc, s).also { r -> synchronized(seriesCache) { seriesCache[id] = r } }
     }
 

@@ -134,6 +134,14 @@ private fun App(prefs: Prefs) {
         if (filteredLib != null && genreMode) Tmdb.start(appContext, filteredLib, tmdbKey)
     }
     androidx.compose.runtime.SideEffect { Current.library = filteredLib }
+    // Nya avsnitt i serier man sett ikapp: kolla när listan är inläst och sedan var sjätte timme
+    LaunchedEffect(readyLib != null) {
+        if (readyLib == null) return@LaunchedEffect
+        while (true) {
+            runCatching { NewEpisodes.checkAll() }
+            kotlinx.coroutines.delay(6 * 60 * 60 * 1000L)
+        }
+    }
     val genreLib by androidx.compose.runtime.produceState<Library?>(null, filteredLib, tmdbVersion, genreMode) {
         val l = filteredLib
         value = if (l != null && genreMode) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Genres.build(l) } else null

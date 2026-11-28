@@ -361,6 +361,19 @@ internal fun ContinueCard(p: Progress, modifier: Modifier = Modifier, onClick: (
         ) {
             Box(Modifier.fillMaxSize()) {
                 Poster(e.logo, e.title, Modifier.fillMaxSize())
+                if (p.isNew) {
+                    Text(
+                        "NYTT AVSNITT",
+                        color = OnAccent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                            .background(Accent, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                }
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -391,7 +404,7 @@ internal fun ContinueCard(p: Progress, modifier: Modifier = Modifier, onClick: (
         val title = if (e.kind == Kind.EPISODE && e.series != null) displayTitle(e.series) else displayTitle(e.title)
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = TextBright)
         val sub = buildString {
-            if (p.upNext) append("Nästa avsnitt · ")
+            if (p.isNew) append("Nytt avsnitt · ") else if (p.upNext) append("Nästa avsnitt · ")
             if (e.kind == Kind.EPISODE && e.season > 0) append("S%02d E%02d · ".format(e.season, e.episode))
             if (p.minutesLeft > 0) append("${p.minutesLeft} min kvar")
         }
